@@ -20,7 +20,7 @@
 
 title: Flora Documentation
 description: >- # this means to ignore newlines until "baseurl:"
-baseurl: "/open_lte_testbed" # the subpath of your site, e.g. /blog
+baseurl: "/Flora" # the subpath of your site, e.g. /blog
 url: "" # the base hostname & protocol for your site, e.g. http://example.com
 
 aux_links:
