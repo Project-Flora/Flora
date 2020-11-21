@@ -39,18 +39,18 @@ This script will install all the necessary prerequisite software and Flora. To s
     [flora/testbed-setup/scripts/OAI]$ ./run.sh
 ```
 
-To connect a phone device to the testbed, you can purchase a blank Javacard and download the software from [link](http://metro.cs.ucla.edu/codeshare.html). Write the correct credential into the Javacard as instructed. Insert the programmed Javacard into any commercial off-the-shelf device and connect to our testbed. For more details, see our [documentation](https://project-flora.github.io/flora/quick_start/).
+To connect a phone device to the testbed, you can purchase a blank Javacard and download the software from [link](http://metro.cs.ucla.edu/codeshare.html). Write the correct credential into the Javacard as instructed. Insert the programmed Javacard into any commercial off-the-shelf device and connect to our testbed. For more details, see our [documentation](https://project-flora.github.io/Flora/quick_start/).
 
 
 ## Base Station Analysis and Edge Computing 
 Flora supports in-depth base station analysis with costomizable analyzers. 
 We also provide example applications for edge computing.
-For usage, please check our [documentation](https://project-flora.github.io/flora/quick_start/).
+For usage, please check our [documentation](https://project-flora.github.io/Flora/quick_start/).
 
 
 
 ## Join the Community
-If you have any technical issue, please go to [Issues](https://github.com/project-flora/flora/issues).
+If you have any technical issue, please go to [Issues](https://github.com/project-flora/Flora/issues).
 For any other question, please contact projectfloranetwork@gmail.com.
 
 
