@@ -1,0 +1,4094 @@
+From b7609ac613fea6cc7fd5742b225763104bf48f85 Mon Sep 17 00:00:00 2001
+From: Zhaowei <tan@cs.ucla.edu>
+Date: Tue, 15 Oct 2019 23:59:58 +0000
+Subject: [PATCH 01/14] add log for PDCP and MAC RB
+
+---
+ openair2/LAYER2/MAC/eNB_scheduler_dlsch.c     |  34 ++
+ openair2/LAYER2/PDCP_v10.1.0/pdcp.c           |   2 +
+ .../PROJECTS/GENERIC-LTE-EPC/CONF/38test.conf | 298 ++++++++++++++++++
+ .../PROJECTS/GENERIC-LTE-EPC/CONF/38wide.conf | 298 ++++++++++++++++++
+ .../GENERIC-LTE-EPC/CONF/log_test.conf        | 298 ++++++++++++++++++
+ .../PROJECTS/GENERIC-LTE-EPC/CONF/mimo.conf   | 298 ++++++++++++++++++
+ .../PROJECTS/GENERIC-LTE-EPC/CONF/test.conf   | 298 ++++++++++++++++++
+ .../PROJECTS/GENERIC-LTE-EPC/CONF/wide.conf   | 298 ++++++++++++++++++
+ 8 files changed, 1824 insertions(+)
+ create mode 100644 targets/PROJECTS/GENERIC-LTE-EPC/CONF/38test.conf
+ create mode 100644 targets/PROJECTS/GENERIC-LTE-EPC/CONF/38wide.conf
+ create mode 100644 targets/PROJECTS/GENERIC-LTE-EPC/CONF/log_test.conf
+ create mode 100644 targets/PROJECTS/GENERIC-LTE-EPC/CONF/mimo.conf
+ create mode 100644 targets/PROJECTS/GENERIC-LTE-EPC/CONF/test.conf
+ create mode 100644 targets/PROJECTS/GENERIC-LTE-EPC/CONF/wide.conf
+
+diff --git a/openair2/LAYER2/MAC/eNB_scheduler_dlsch.c b/openair2/LAYER2/MAC/eNB_scheduler_dlsch.c
+index 134089dbf..c7c87dd70 100644
+--- a/openair2/LAYER2/MAC/eNB_scheduler_dlsch.c
++++ b/openair2/LAYER2/MAC/eNB_scheduler_dlsch.c
+@@ -580,6 +580,15 @@ schedule_ue_spec(module_id_t module_idP,
+     eNB_stats->total_available_prbs += total_nb_available_rb[CC_id];
+     eNB_stats->dlsch_bytes_tx = 0;
+     eNB_stats->dlsch_pdus_tx = 0;
++    LOG_D(MAC, "[eNB %d] Frame %d Subframe %d: CC_id %d Available RB %d Active UE %d Bandwidth %ld\n",
++        module_idP,
++        frameP,
++	subframeP,
++        CC_id,
++        eNB_stats->available_prbs,
++	eNB_stats->num_dlactive_UEs,
++	dl_Bandwidth);
++
+   }
+ 
+   // CALLING Pre_Processor for downlink scheduling
+@@ -2657,6 +2666,17 @@ fill_DLSCH_dci(module_id_t module_idP,
+                 N_RBG,
+                 rballoc_sub);
+             dl_config_pdu->dci_dl_pdu.dci_dl_pdu_rel8.resource_allocation_type = 0;
++
++LOG_E(MAC, "DCI Frame %d, SubFrame%d, CC_id %d, UE_id: %d, number of rb %d, coding: %d\n",
++            frameP,
++            subframeP,
++            CC_id,
++            UE_id,
++            nb_rb,
++            dl_config_pdu->dci_dl_pdu.dci_dl_pdu_rel8.resource_block_coding
++            );
++
++
+           } else if (dl_config_pdu->pdu_type == NFAPI_DL_CONFIG_DLSCH_PDU_TYPE &&
+                      dl_config_pdu->dlsch_pdu.dlsch_pdu_rel8.rnti == rnti &&
+                      dl_config_pdu->dlsch_pdu.dlsch_pdu_rel8.resource_allocation_type == 0) {
+@@ -2664,7 +2684,21 @@ fill_DLSCH_dci(module_id_t module_idP,
+                 N_RB_DL,
+                 N_RBG,
+                 rballoc_sub);
++
++LOG_E(MAC, "DLSCH Frame %d, SubFrame%d, CC_id %d, UE_id: %d, number of rb %d, coding: %d\n",
++            frameP,
++            subframeP,
++            CC_id,
++            UE_id,
++            nb_rb,
++            dl_config_pdu->dlsch_pdu.dlsch_pdu_rel8.resource_block_coding
++            );
++
++
+           }
++
++
++
+         }
+       }
+     }
+diff --git a/openair2/LAYER2/PDCP_v10.1.0/pdcp.c b/openair2/LAYER2/PDCP_v10.1.0/pdcp.c
+index 41688a62c..1677d769a 100644
+--- a/openair2/LAYER2/PDCP_v10.1.0/pdcp.c
++++ b/openair2/LAYER2/PDCP_v10.1.0/pdcp.c
+@@ -929,6 +929,8 @@ pdcp_data_ind(
+    * from its second byte (skipping 0th and 1st octets, i.e.
+    * PDCP header)
+    */
++  LOG_E(PDCP, "frame: %d, subframe: %d, sequence number: %d, size: %d\n",
++    ctxt_pP->frame, ctxt_pP->subframe, sequence_number, sdu_buffer_sizeP - payload_offset);
+ 
+   if (LINK_ENB_PDCP_TO_GTPV1U) {
+     if ((TRUE == ctxt_pP->enb_flag) && (FALSE == srb_flagP)) {
+diff --git a/targets/PROJECTS/GENERIC-LTE-EPC/CONF/38test.conf b/targets/PROJECTS/GENERIC-LTE-EPC/CONF/38test.conf
+new file mode 100644
+index 000000000..856324079
+--- /dev/null
++++ b/targets/PROJECTS/GENERIC-LTE-EPC/CONF/38test.conf
+@@ -0,0 +1,298 @@
++Active_eNBs = ( "eNB-Eurecom-LTEBox");
++# Asn1_verbosity, choice in: none, info, annoying
++Asn1_verbosity = "none";
++
++eNBs =
++(
++ {
++    ////////// Identification parameters:
++    eNB_ID    =  0xe00;
++
++    cell_type =  "CELL_MACRO_ENB";
++
++    eNB_name  =  "eNB-Eurecom-LTEBox";
++
++    // Tracking area code, 0x0000 and 0xfffe are reserved values
++    tracking_area_code  =  1;
++
++    plmn_list = ( { mcc = 901; mnc = 70; mnc_length = 2; } );
++
++    tr_s_preference     = "local_mac"
++
++    ////////// Physical parameters:
++
++    component_carriers = (
++      {
++      node_function             = "3GPP_eNODEB";
++      node_timing               = "synch_to_ext_device";
++      node_synch_ref            = 0;
++      frame_type					      = "FDD";
++      tdd_config 					      = 3;
++      tdd_config_s            			      = 0;
++      prefix_type             			      = "NORMAL";
++      eutra_band              			      = 7;
++      downlink_frequency      			      = 2685000000L;
++      uplink_frequency_offset 			      = -120000000;
++      Nid_cell					      = 0;
++      N_RB_DL                 			      = 50;
++      Nid_cell_mbsfn          			      = 0;
++      nb_antenna_ports                                = 1;
++      nb_antennas_tx          			      = 1;
++      nb_antennas_rx          			      = 1;
++      tx_gain                                            = 90;
++      rx_gain                                            = 125;
++      pbch_repetition                                 = "FALSE";
++      prach_root              			      = 0;
++      prach_config_index      			      = 0;
++      prach_high_speed        			      = "DISABLE";
++      prach_zero_correlation  			      = 1;
++      prach_freq_offset       			      = 2;
++      pucch_delta_shift       			      = 1;
++      pucch_nRB_CQI           			      = 0;
++      pucch_nCS_AN            			      = 0;
++      pucch_n1_AN             			      = 0;
++      pdsch_referenceSignalPower 			      = -27;
++      pdsch_p_b                  			      = 0;
++      pusch_n_SB                 			      = 1;
++      pusch_enable64QAM          			      = "ENABLE";
++      pusch_hoppingMode                                  = "interSubFrame";
++      pusch_hoppingOffset                                = 0;
++      pusch_groupHoppingEnabled  			      = "ENABLE";
++      pusch_groupAssignment      			      = 0;
++      pusch_sequenceHoppingEnabled		   	      = "DISABLE";
++      pusch_nDMRS1                                       = 1;
++      phich_duration                                     = "NORMAL";
++      phich_resource                                     = "ONESIXTH";
++      srs_enable                                         = "DISABLE";
++      /*  srs_BandwidthConfig                                =;
++      srs_SubframeConfig                                 =;
++      srs_ackNackST                                      =;
++      srs_MaxUpPts                                       =;*/
++
++      pusch_p0_Nominal                                   = -96;
++      pusch_alpha                                        = "AL1";
++      pucch_p0_Nominal                                   = -104;
++      msg3_delta_Preamble                                = 6;
++      pucch_deltaF_Format1                               = "deltaF2";
++      pucch_deltaF_Format1b                              = "deltaF3";
++      pucch_deltaF_Format2                               = "deltaF0";
++      pucch_deltaF_Format2a                              = "deltaF0";
++      pucch_deltaF_Format2b		    	      = "deltaF0";
++
++      rach_numberOfRA_Preambles                          = 64;
++      rach_preamblesGroupAConfig                         = "DISABLE";
++      /*
++      rach_sizeOfRA_PreamblesGroupA                      = ;
++      rach_messageSizeGroupA                             = ;
++      rach_messagePowerOffsetGroupB                      = ;
++      */
++      rach_powerRampingStep                              = 4;
++      rach_preambleInitialReceivedTargetPower            = -108;
++      rach_preambleTransMax                              = 10;
++      rach_raResponseWindowSize                          = 10;
++      rach_macContentionResolutionTimer                  = 48;
++      rach_maxHARQ_Msg3Tx                                = 4;
++
++      pcch_default_PagingCycle                           = 128;
++      pcch_nB                                            = "oneT";
++      bcch_modificationPeriodCoeff			      = 2;
++      ue_TimersAndConstants_t300			      = 1000;
++      ue_TimersAndConstants_t301			      = 1000;
++      ue_TimersAndConstants_t310			      = 1000;
++      ue_TimersAndConstants_t311			      = 10000;
++      ue_TimersAndConstants_n310			      = 20;
++      ue_TimersAndConstants_n311			      = 1;
++      ue_TransmissionMode                                    = 1;
++
++      //Parameters for SIB18
++      rxPool_sc_CP_Len                                       = "normal";
++      rxPool_sc_Period                                       = "sf40";
++      rxPool_data_CP_Len                                     = "normal";
++      rxPool_ResourceConfig_prb_Num                          = 20;
++      rxPool_ResourceConfig_prb_Start                        = 5;
++      rxPool_ResourceConfig_prb_End                          = 44;
++      rxPool_ResourceConfig_offsetIndicator_present          = "prSmall";
++      rxPool_ResourceConfig_offsetIndicator_choice           = 0;
++      rxPool_ResourceConfig_subframeBitmap_present           = "prBs40";
++      rxPool_ResourceConfig_subframeBitmap_choice_bs_buf              = "00000000000000000000";
++      rxPool_ResourceConfig_subframeBitmap_choice_bs_size             = 5;
++      rxPool_ResourceConfig_subframeBitmap_choice_bs_bits_unused      = 0;
++/*    rxPool_dataHoppingConfig_hoppingParameter                       = 0;
++      rxPool_dataHoppingConfig_numSubbands                            = "ns1";
++      rxPool_dataHoppingConfig_rbOffset                               = 0;
++      rxPool_commTxResourceUC-ReqAllowed                              = "TRUE";
++*/
++      // Parameters for SIB19
++      discRxPool_cp_Len                                               = "normal"
++      discRxPool_discPeriod                                           = "rf32"
++      discRxPool_numRetx                                              = 1;
++      discRxPool_numRepetition                                        = 2;
++      discRxPool_ResourceConfig_prb_Num                               = 5;
++      discRxPool_ResourceConfig_prb_Start                             = 3;
++      discRxPool_ResourceConfig_prb_End                               = 21;
++      discRxPool_ResourceConfig_offsetIndicator_present               = "prSmall";
++      discRxPool_ResourceConfig_offsetIndicator_choice                = 0;
++      discRxPool_ResourceConfig_subframeBitmap_present                = "prBs40";
++      discRxPool_ResourceConfig_subframeBitmap_choice_bs_buf          = "f0ffffffff";
++      discRxPool_ResourceConfig_subframeBitmap_choice_bs_size         = 5;
++      discRxPool_ResourceConfig_subframeBitmap_choice_bs_bits_unused  = 0;
++
++      }
++    );
++
++
++    srb1_parameters :
++    {
++        # timer_poll_retransmit = (ms) [5, 10, 15, 20,... 250, 300, 350, ... 500]
++        timer_poll_retransmit    = 80;
++
++        # timer_reordering = (ms) [0,5, ... 100, 110, 120, ... ,200]
++        timer_reordering         = 35;
++
++        # timer_reordering = (ms) [0,5, ... 250, 300, 350, ... ,500]
++        timer_status_prohibit    = 0;
++
++        # poll_pdu = [4, 8, 16, 32 , 64, 128, 256, infinity(>10000)]
++        poll_pdu                 =  4;
++
++        # poll_byte = (kB) [25,50,75,100,125,250,375,500,750,1000,1250,1500,2000,3000,infinity(>10000)]
++        poll_byte                =  99999;
++
++        # max_retx_threshold = [1, 2, 3, 4 , 6, 8, 16, 32]
++        max_retx_threshold       =  4;
++    }
++
++    # ------- SCTP definitions
++    SCTP :
++    {
++        # Number of streams to use in input/output
++        SCTP_INSTREAMS  = 2;
++        SCTP_OUTSTREAMS = 2;
++    };
++
++
++    ////////// MME parameters:
++    mme_ip_address      = ( { ipv4       = "192.168.60.142";
++                              ipv6       = "192:168:30::17";
++                              active     = "yes";
++                              preference = "ipv4";
++                            }
++                          );
++
++    enable_measurement_reports = "no";
++
++    ///X2
++    enable_x2 = "no";
++    t_reloc_prep      = 1000;      /* unit: millisecond */
++    tx2_reloc_overall = 2000;      /* unit: millisecond */
++
++    NETWORK_INTERFACES :
++    {
++        ENB_INTERFACE_NAME_FOR_S1_MME            = "vboxnet0";
++        ENB_IPV4_ADDRESS_FOR_S1_MME              = "192.168.60.1";
++        ENB_INTERFACE_NAME_FOR_S1U               = "vboxnet0";
++        ENB_IPV4_ADDRESS_FOR_S1U                 = "192.168.60.1";
++        ENB_PORT_FOR_S1U                         = 2152; # Spec 2152
++    }; 
++    
++  }
++);
++
++DU = (
++    {
++	DU_INTERFACE_NAME_FOR_F1U           = "lo";
++	DU_IPV4_ADDRESS_FOR_F1U             = "127.0.0.1/16";
++	DU_PORT_FOR_F1U                     = 22100;
++	F1_U_DU_TRANSPORT_TYPE		    = "TCP";
++    }
++    );
++    
++CU = (
++    {     
++        CU_INTERFACE_NAME_FOR_F1U           = "lo";
++        CU_IPV4_ADDRESS_FOR_F1U             = "127.0.0.1";   //Address to search the DU
++        CU_PORT_FOR_F1U                     = 22100;
++        F1_U_CU_TRANSPORT_TYPE              = "TCP";	     // One of TCP/UDP/SCTP
++        DU_TYPE 			    = "LTE";
++    }//,
++//    {     
++//        CU_INTERFACE_NAME_FOR_F1U           = "eth0";
++//        CU_IPV4_ADDRESS_FOR_F1U             = "10.64.93.142";   //Address to search the DU
++//        CU_PORT_FOR_F1U                     = 2211;
++//        F1_U_CU_TRANSPORT_TYPE              = "TCP";          // One of TCP/UDP/SCTP
++//        DU_TYPE 			    = "WiFi";
++//    }
++    );
++
++    CU_BALANCING = "ALL";
++
++MACRLCs = (
++	{
++	num_cc = 1;
++	tr_s_preference = "local_L1";
++	tr_n_preference = "local_RRC";
++	phy_test_mode = 0;
++        puSch10xSnr     =  200;
++        puCch10xSnr     =  200;
++        }  
++);
++
++L1s = (
++    	{
++	num_cc = 1;
++	tr_n_preference = "local_mac";
++        }  
++);
++
++RUs = (
++    {		  
++       local_rf       = "yes"
++         nb_tx          = 1
++         nb_rx          = 1
++         att_tx         = 0
++         att_rx         = 0;
++         bands          = [7];
++         max_pdschReferenceSignalPower = -27;
++         max_rxgain                    = 125;
++         eNB_instances  = [0];
++
++    }
++);  
++
++NETWORK_CONTROLLER :
++{
++    FLEXRAN_ENABLED        = "no";
++    FLEXRAN_INTERFACE_NAME = "lo";
++    FLEXRAN_IPV4_ADDRESS   = "127.0.0.1";
++    FLEXRAN_PORT           = 2210;
++    FLEXRAN_CACHE          = "/mnt/oai_agent_cache";
++    FLEXRAN_AWAIT_RECONF   = "no";
++};
++
++THREAD_STRUCT = (
++  {
++    #three config for level of parallelism "PARALLEL_SINGLE_THREAD", "PARALLEL_RU_L1_SPLIT", or "PARALLEL_RU_L1_TRX_SPLIT"
++    parallel_config    = "PARALLEL_RU_L1_TRX_SPLIT";
++    #two option for worker "WORKER_DISABLE" or "WORKER_ENABLE"
++    worker_config      = "WORKER_ENABLE";
++  }
++);
++
++     log_config :
++     {
++       global_log_level                      ="error";
++       global_log_verbosity                  ="medium";
++       hw_log_level                          ="error";
++       hw_log_verbosity                      ="medium";
++       phy_log_level                         ="error";
++       phy_log_verbosity                     ="medium";
++       mac_log_level                         ="error";
++       mac_log_verbosity                     ="medium";
++       rlc_log_level                         ="error";
++       rlc_log_verbosity                     ="medium";
++       pdcp_log_level                        ="error";
++       pdcp_log_verbosity                    ="medium";
++       rrc_log_level                         ="error";
++       rrc_log_verbosity                     ="medium";
++    };
++
+diff --git a/targets/PROJECTS/GENERIC-LTE-EPC/CONF/38wide.conf b/targets/PROJECTS/GENERIC-LTE-EPC/CONF/38wide.conf
+new file mode 100644
+index 000000000..97eb16c08
+--- /dev/null
++++ b/targets/PROJECTS/GENERIC-LTE-EPC/CONF/38wide.conf
+@@ -0,0 +1,298 @@
++Active_eNBs = ( "eNB-Eurecom-LTEBox");
++# Asn1_verbosity, choice in: none, info, annoying
++Asn1_verbosity = "none";
++
++eNBs =
++(
++ {
++    ////////// Identification parameters:
++    eNB_ID    =  0xe00;
++
++    cell_type =  "CELL_MACRO_ENB";
++
++    eNB_name  =  "eNB-Eurecom-LTEBox";
++
++    // Tracking area code, 0x0000 and 0xfffe are reserved values
++    tracking_area_code  =  1;
++
++    plmn_list = ( { mcc = 901; mnc = 70; mnc_length = 2; } );
++
++    tr_s_preference     = "local_mac"
++
++    ////////// Physical parameters:
++
++    component_carriers = (
++      {
++      node_function             = "3GPP_eNODEB";
++      node_timing               = "synch_to_ext_device";
++      node_synch_ref            = 0;
++      frame_type					      = "TDD";
++      tdd_config 					      = 3;
++      tdd_config_s            			      = 0;
++      prefix_type             			      = "NORMAL";
++      eutra_band              			      = 38;
++      downlink_frequency      			      = 2600000000L;
++      uplink_frequency_offset 			      = 0;
++      Nid_cell					      = 0;
++      N_RB_DL                 			      = 100;
++      Nid_cell_mbsfn          			      = 0;
++      nb_antenna_ports                                = 1;
++      nb_antennas_tx          			      = 1;
++      nb_antennas_rx          			      = 1;
++      tx_gain                                            = 32;
++      rx_gain                                            = 116;
++      pbch_repetition                                 = "FALSE";
++      prach_root              			      = 0;
++      prach_config_index      			      = 0;
++      prach_high_speed        			      = "DISABLE";
++      prach_zero_correlation  			      = 1;
++      prach_freq_offset       			      = 2;
++      pucch_delta_shift       			      = 1;
++      pucch_nRB_CQI           			      = 1;
++      pucch_nCS_AN            			      = 0;
++      pucch_n1_AN             			      = 0;
++      pdsch_referenceSignalPower 			      = -16;
++      pdsch_p_b                  			      = 0;
++      pusch_n_SB                 			      = 1;
++      pusch_enable64QAM          			      = "ENABLE";
++      pusch_hoppingMode                                  = "interSubFrame";
++      pusch_hoppingOffset                                = 0;
++      pusch_groupHoppingEnabled  			      = "ENABLE";
++      pusch_groupAssignment      			      = 0;
++      pusch_sequenceHoppingEnabled		   	      = "DISABLE";
++      pusch_nDMRS1                                       = 1;
++      phich_duration                                     = "NORMAL";
++      phich_resource                                     = "ONESIXTH";
++      srs_enable                                         = "DISABLE";
++      /*  srs_BandwidthConfig                                =;
++      srs_SubframeConfig                                 =;
++      srs_ackNackST                                      =;
++      srs_MaxUpPts                                       =;*/
++
++      pusch_p0_Nominal                                   = -90;
++      pusch_alpha                                        = "AL1";
++      pucch_p0_Nominal                                   = -108;
++      msg3_delta_Preamble                                = 6;
++      pucch_deltaF_Format1                               = "deltaF2";
++      pucch_deltaF_Format1b                              = "deltaF3";
++      pucch_deltaF_Format2                               = "deltaF0";
++      pucch_deltaF_Format2a                              = "deltaF0";
++      pucch_deltaF_Format2b		    	      = "deltaF0";
++
++      rach_numberOfRA_Preambles                          = 64;
++      rach_preamblesGroupAConfig                         = "DISABLE";
++      /*
++      rach_sizeOfRA_PreamblesGroupA                      = ;
++      rach_messageSizeGroupA                             = ;
++      rach_messagePowerOffsetGroupB                      = ;
++      */
++      rach_powerRampingStep                              = 4;
++      rach_preambleInitialReceivedTargetPower            = -108;
++      rach_preambleTransMax                              = 10;
++      rach_raResponseWindowSize                          = 10;
++      rach_macContentionResolutionTimer                  = 48;
++      rach_maxHARQ_Msg3Tx                                = 4;
++
++      pcch_default_PagingCycle                           = 128;
++      pcch_nB                                            = "oneT";
++      bcch_modificationPeriodCoeff			      = 2;
++      ue_TimersAndConstants_t300			      = 1000;
++      ue_TimersAndConstants_t301			      = 1000;
++      ue_TimersAndConstants_t310			      = 1000;
++      ue_TimersAndConstants_t311			      = 10000;
++      ue_TimersAndConstants_n310			      = 20;
++      ue_TimersAndConstants_n311			      = 1;
++      ue_TransmissionMode                                    = 1;
++
++      //Parameters for SIB18
++      rxPool_sc_CP_Len                                       = "normal";
++      rxPool_sc_Period                                       = "sf40";
++      rxPool_data_CP_Len                                     = "normal";
++      rxPool_ResourceConfig_prb_Num                          = 20;
++      rxPool_ResourceConfig_prb_Start                        = 5;
++      rxPool_ResourceConfig_prb_End                          = 44;
++      rxPool_ResourceConfig_offsetIndicator_present          = "prSmall";
++      rxPool_ResourceConfig_offsetIndicator_choice           = 0;
++      rxPool_ResourceConfig_subframeBitmap_present           = "prBs40";
++      rxPool_ResourceConfig_subframeBitmap_choice_bs_buf              = "00000000000000000000";
++      rxPool_ResourceConfig_subframeBitmap_choice_bs_size             = 5;
++      rxPool_ResourceConfig_subframeBitmap_choice_bs_bits_unused      = 0;
++/*    rxPool_dataHoppingConfig_hoppingParameter                       = 0;
++      rxPool_dataHoppingConfig_numSubbands                            = "ns1";
++      rxPool_dataHoppingConfig_rbOffset                               = 0;
++      rxPool_commTxResourceUC-ReqAllowed                              = "TRUE";
++*/
++      // Parameters for SIB19
++      discRxPool_cp_Len                                               = "normal"
++      discRxPool_discPeriod                                           = "rf32"
++      discRxPool_numRetx                                              = 1;
++      discRxPool_numRepetition                                        = 2;
++      discRxPool_ResourceConfig_prb_Num                               = 5;
++      discRxPool_ResourceConfig_prb_Start                             = 3;
++      discRxPool_ResourceConfig_prb_End                               = 21;
++      discRxPool_ResourceConfig_offsetIndicator_present               = "prSmall";
++      discRxPool_ResourceConfig_offsetIndicator_choice                = 0;
++      discRxPool_ResourceConfig_subframeBitmap_present                = "prBs40";
++      discRxPool_ResourceConfig_subframeBitmap_choice_bs_buf          = "f0ffffffff";
++      discRxPool_ResourceConfig_subframeBitmap_choice_bs_size         = 5;
++      discRxPool_ResourceConfig_subframeBitmap_choice_bs_bits_unused  = 0;
++
++      }
++    );
++
++
++    srb1_parameters :
++    {
++        # timer_poll_retransmit = (ms) [5, 10, 15, 20,... 250, 300, 350, ... 500]
++        timer_poll_retransmit    = 80;
++
++        # timer_reordering = (ms) [0,5, ... 100, 110, 120, ... ,200]
++        timer_reordering         = 35;
++
++        # timer_reordering = (ms) [0,5, ... 250, 300, 350, ... ,500]
++        timer_status_prohibit    = 0;
++
++        # poll_pdu = [4, 8, 16, 32 , 64, 128, 256, infinity(>10000)]
++        poll_pdu                 =  4;
++
++        # poll_byte = (kB) [25,50,75,100,125,250,375,500,750,1000,1250,1500,2000,3000,infinity(>10000)]
++        poll_byte                =  99999;
++
++        # max_retx_threshold = [1, 2, 3, 4 , 6, 8, 16, 32]
++        max_retx_threshold       =  4;
++    }
++
++    # ------- SCTP definitions
++    SCTP :
++    {
++        # Number of streams to use in input/output
++        SCTP_INSTREAMS  = 2;
++        SCTP_OUTSTREAMS = 2;
++    };
++
++
++    ////////// MME parameters:
++    mme_ip_address      = ( { ipv4       = "192.168.60.142";
++                              ipv6       = "192:168:30::17";
++                              active     = "yes";
++                              preference = "ipv4";
++                            }
++                          );
++
++    enable_measurement_reports = "no";
++
++    ///X2
++    enable_x2 = "no";
++    t_reloc_prep      = 1000;      /* unit: millisecond */
++    tx2_reloc_overall = 2000;      /* unit: millisecond */
++
++    NETWORK_INTERFACES :
++    {
++        ENB_INTERFACE_NAME_FOR_S1_MME            = "vboxnet0";
++        ENB_IPV4_ADDRESS_FOR_S1_MME              = "192.168.60.1";
++        ENB_INTERFACE_NAME_FOR_S1U               = "vboxnet0";
++        ENB_IPV4_ADDRESS_FOR_S1U                 = "192.168.60.1";
++        ENB_PORT_FOR_S1U                         = 2152; # Spec 2152
++    }; 
++    
++  }
++);
++
++DU = (
++    {
++	DU_INTERFACE_NAME_FOR_F1U           = "lo";
++	DU_IPV4_ADDRESS_FOR_F1U             = "127.0.0.1/16";
++	DU_PORT_FOR_F1U                     = 22100;
++	F1_U_DU_TRANSPORT_TYPE		    = "TCP";
++    }
++    );
++    
++CU = (
++    {     
++        CU_INTERFACE_NAME_FOR_F1U           = "lo";
++        CU_IPV4_ADDRESS_FOR_F1U             = "127.0.0.1";   //Address to search the DU
++        CU_PORT_FOR_F1U                     = 22100;
++        F1_U_CU_TRANSPORT_TYPE              = "TCP";	     // One of TCP/UDP/SCTP
++        DU_TYPE 			    = "LTE";
++    }//,
++//    {     
++//        CU_INTERFACE_NAME_FOR_F1U           = "eth0";
++//        CU_IPV4_ADDRESS_FOR_F1U             = "10.64.93.142";   //Address to search the DU
++//        CU_PORT_FOR_F1U                     = 2211;
++//        F1_U_CU_TRANSPORT_TYPE              = "TCP";          // One of TCP/UDP/SCTP
++//        DU_TYPE 			    = "WiFi";
++//    }
++    );
++
++    CU_BALANCING = "ALL";
++
++MACRLCs = (
++	{
++	num_cc = 1;
++	tr_s_preference = "local_L1";
++	tr_n_preference = "local_RRC";
++	phy_test_mode = 0;
++        puSch10xSnr     =  200;
++        puCch10xSnr     =  200;
++        }  
++);
++
++L1s = (
++    	{
++	num_cc = 1;
++	tr_n_preference = "local_mac";
++        }  
++);
++
++RUs = (
++    {		  
++       local_rf       = "yes"
++         nb_tx          = 1
++         nb_rx          = 1
++         att_tx         = 0
++         att_rx         = 0;
++         bands          = [7];
++         max_pdschReferenceSignalPower = -27;
++         max_rxgain                    = 125;
++         eNB_instances  = [0];
++
++    }
++);  
++
++NETWORK_CONTROLLER :
++{
++    FLEXRAN_ENABLED        = "no";
++    FLEXRAN_INTERFACE_NAME = "lo";
++    FLEXRAN_IPV4_ADDRESS   = "127.0.0.1";
++    FLEXRAN_PORT           = 2210;
++    FLEXRAN_CACHE          = "/mnt/oai_agent_cache";
++    FLEXRAN_AWAIT_RECONF   = "no";
++};
++
++THREAD_STRUCT = (
++  {
++    #three config for level of parallelism "PARALLEL_SINGLE_THREAD", "PARALLEL_RU_L1_SPLIT", or "PARALLEL_RU_L1_TRX_SPLIT"
++    parallel_config    = "PARALLEL_RU_L1_TRX_SPLIT";
++    #two option for worker "WORKER_DISABLE" or "WORKER_ENABLE"
++    worker_config      = "WORKER_ENABLE";
++  }
++);
++
++     log_config :
++     {
++       global_log_level                      ="info";
++       global_log_verbosity                  ="medium";
++       hw_log_level                          ="info";
++       hw_log_verbosity                      ="medium";
++       phy_log_level                         ="info";
++       phy_log_verbosity                     ="medium";
++       mac_log_level                         ="info";
++       mac_log_verbosity                     ="high";
++       rlc_log_level                         ="info";
++       rlc_log_verbosity                     ="medium";
++       pdcp_log_level                        ="info";
++       pdcp_log_verbosity                    ="medium";
++       rrc_log_level                         ="info";
++       rrc_log_verbosity                     ="medium";
++    };
++
+diff --git a/targets/PROJECTS/GENERIC-LTE-EPC/CONF/log_test.conf b/targets/PROJECTS/GENERIC-LTE-EPC/CONF/log_test.conf
+new file mode 100644
+index 000000000..734f6a442
+--- /dev/null
++++ b/targets/PROJECTS/GENERIC-LTE-EPC/CONF/log_test.conf
+@@ -0,0 +1,298 @@
++Active_eNBs = ( "eNB-Eurecom-LTEBox");
++# Asn1_verbosity, choice in: none, info, annoying
++Asn1_verbosity = "none";
++
++eNBs =
++(
++ {
++    ////////// Identification parameters:
++    eNB_ID    =  0xe00;
++
++    cell_type =  "CELL_MACRO_ENB";
++
++    eNB_name  =  "eNB-Eurecom-LTEBox";
++
++    // Tracking area code, 0x0000 and 0xfffe are reserved values
++    tracking_area_code  =  1;
++
++    plmn_list = ( { mcc = 901; mnc = 70; mnc_length = 2; } );
++
++    tr_s_preference     = "local_mac"
++
++    ////////// Physical parameters:
++
++    component_carriers = (
++      {
++      node_function             = "3GPP_eNODEB";
++      node_timing               = "synch_to_ext_device";
++      node_synch_ref            = 0;
++      frame_type					      = "FDD";
++      tdd_config 					      = 3;
++      tdd_config_s            			      = 0;
++      prefix_type             			      = "NORMAL";
++      eutra_band              			      = 7;
++      downlink_frequency      			      = 2680000000L;
++      uplink_frequency_offset 			      = -120000000;
++      Nid_cell					      = 0;
++      N_RB_DL                 			      = 100;
++      Nid_cell_mbsfn          			      = 0;
++      nb_antenna_ports                                = 1;
++      nb_antennas_tx          			      = 1;
++      nb_antennas_rx          			      = 1;
++      tx_gain                                            = 90;
++      rx_gain                                            = 125;
++      pbch_repetition                                 = "FALSE";
++      prach_root              			      = 0;
++      prach_config_index      			      = 0;
++      prach_high_speed        			      = "DISABLE";
++      prach_zero_correlation  			      = 1;
++      prach_freq_offset       			      = 2;
++      pucch_delta_shift       			      = 1;
++      pucch_nRB_CQI           			      = 0;
++      pucch_nCS_AN            			      = 0;
++      pucch_n1_AN             			      = 0;
++      pdsch_referenceSignalPower 			      = -27;
++      pdsch_p_b                  			      = 0;
++      pusch_n_SB                 			      = 1;
++      pusch_enable64QAM          			      = "ENABLE";
++      pusch_hoppingMode                                  = "interSubFrame";
++      pusch_hoppingOffset                                = 0;
++      pusch_groupHoppingEnabled  			      = "ENABLE";
++      pusch_groupAssignment      			      = 0;
++      pusch_sequenceHoppingEnabled		   	      = "DISABLE";
++      pusch_nDMRS1                                       = 1;
++      phich_duration                                     = "NORMAL";
++      phich_resource                                     = "ONESIXTH";
++      srs_enable                                         = "DISABLE";
++      /*  srs_BandwidthConfig                                =;
++      srs_SubframeConfig                                 =;
++      srs_ackNackST                                      =;
++      srs_MaxUpPts                                       =;*/
++
++      pusch_p0_Nominal                                   = -96;
++      pusch_alpha                                        = "AL1";
++      pucch_p0_Nominal                                   = -104;
++      msg3_delta_Preamble                                = 6;
++      pucch_deltaF_Format1                               = "deltaF2";
++      pucch_deltaF_Format1b                              = "deltaF3";
++      pucch_deltaF_Format2                               = "deltaF0";
++      pucch_deltaF_Format2a                              = "deltaF0";
++      pucch_deltaF_Format2b		    	      = "deltaF0";
++
++      rach_numberOfRA_Preambles                          = 64;
++      rach_preamblesGroupAConfig                         = "DISABLE";
++      /*
++      rach_sizeOfRA_PreamblesGroupA                      = ;
++      rach_messageSizeGroupA                             = ;
++      rach_messagePowerOffsetGroupB                      = ;
++      */
++      rach_powerRampingStep                              = 4;
++      rach_preambleInitialReceivedTargetPower            = -108;
++      rach_preambleTransMax                              = 10;
++      rach_raResponseWindowSize                          = 10;
++      rach_macContentionResolutionTimer                  = 48;
++      rach_maxHARQ_Msg3Tx                                = 4;
++
++      pcch_default_PagingCycle                           = 128;
++      pcch_nB                                            = "oneT";
++      bcch_modificationPeriodCoeff			      = 2;
++      ue_TimersAndConstants_t300			      = 1000;
++      ue_TimersAndConstants_t301			      = 1000;
++      ue_TimersAndConstants_t310			      = 1000;
++      ue_TimersAndConstants_t311			      = 10000;
++      ue_TimersAndConstants_n310			      = 20;
++      ue_TimersAndConstants_n311			      = 1;
++      ue_TransmissionMode                                    = 1;
++
++      //Parameters for SIB18
++      rxPool_sc_CP_Len                                       = "normal";
++      rxPool_sc_Period                                       = "sf40";
++      rxPool_data_CP_Len                                     = "normal";
++      rxPool_ResourceConfig_prb_Num                          = 20;
++      rxPool_ResourceConfig_prb_Start                        = 5;
++      rxPool_ResourceConfig_prb_End                          = 44;
++      rxPool_ResourceConfig_offsetIndicator_present          = "prSmall";
++      rxPool_ResourceConfig_offsetIndicator_choice           = 0;
++      rxPool_ResourceConfig_subframeBitmap_present           = "prBs40";
++      rxPool_ResourceConfig_subframeBitmap_choice_bs_buf              = "00000000000000000000";
++      rxPool_ResourceConfig_subframeBitmap_choice_bs_size             = 5;
++      rxPool_ResourceConfig_subframeBitmap_choice_bs_bits_unused      = 0;
++/*    rxPool_dataHoppingConfig_hoppingParameter                       = 0;
++      rxPool_dataHoppingConfig_numSubbands                            = "ns1";
++      rxPool_dataHoppingConfig_rbOffset                               = 0;
++      rxPool_commTxResourceUC-ReqAllowed                              = "TRUE";
++*/
++      // Parameters for SIB19
++      discRxPool_cp_Len                                               = "normal"
++      discRxPool_discPeriod                                           = "rf32"
++      discRxPool_numRetx                                              = 1;
++      discRxPool_numRepetition                                        = 2;
++      discRxPool_ResourceConfig_prb_Num                               = 5;
++      discRxPool_ResourceConfig_prb_Start                             = 3;
++      discRxPool_ResourceConfig_prb_End                               = 21;
++      discRxPool_ResourceConfig_offsetIndicator_present               = "prSmall";
++      discRxPool_ResourceConfig_offsetIndicator_choice                = 0;
++      discRxPool_ResourceConfig_subframeBitmap_present                = "prBs40";
++      discRxPool_ResourceConfig_subframeBitmap_choice_bs_buf          = "f0ffffffff";
++      discRxPool_ResourceConfig_subframeBitmap_choice_bs_size         = 5;
++      discRxPool_ResourceConfig_subframeBitmap_choice_bs_bits_unused  = 0;
++
++      }
++    );
++
++
++    srb1_parameters :
++    {
++        # timer_poll_retransmit = (ms) [5, 10, 15, 20,... 250, 300, 350, ... 500]
++        timer_poll_retransmit    = 80;
++
++        # timer_reordering = (ms) [0,5, ... 100, 110, 120, ... ,200]
++        timer_reordering         = 35;
++
++        # timer_reordering = (ms) [0,5, ... 250, 300, 350, ... ,500]
++        timer_status_prohibit    = 0;
++
++        # poll_pdu = [4, 8, 16, 32 , 64, 128, 256, infinity(>10000)]
++        poll_pdu                 =  4;
++
++        # poll_byte = (kB) [25,50,75,100,125,250,375,500,750,1000,1250,1500,2000,3000,infinity(>10000)]
++        poll_byte                =  99999;
++
++        # max_retx_threshold = [1, 2, 3, 4 , 6, 8, 16, 32]
++        max_retx_threshold       =  4;
++    }
++
++    # ------- SCTP definitions
++    SCTP :
++    {
++        # Number of streams to use in input/output
++        SCTP_INSTREAMS  = 2;
++        SCTP_OUTSTREAMS = 2;
++    };
++
++
++    ////////// MME parameters:
++    mme_ip_address      = ( { ipv4       = "192.168.60.142";
++                              ipv6       = "192:168:30::17";
++                              active     = "yes";
++                              preference = "ipv4";
++                            }
++                          );
++
++    enable_measurement_reports = "no";
++
++    ///X2
++    enable_x2 = "no";
++    t_reloc_prep      = 1000;      /* unit: millisecond */
++    tx2_reloc_overall = 2000;      /* unit: millisecond */
++
++    NETWORK_INTERFACES :
++    {
++        ENB_INTERFACE_NAME_FOR_S1_MME            = "vboxnet0";
++        ENB_IPV4_ADDRESS_FOR_S1_MME              = "192.168.60.1";
++        ENB_INTERFACE_NAME_FOR_S1U               = "vboxnet0";
++        ENB_IPV4_ADDRESS_FOR_S1U                 = "192.168.60.1";
++        ENB_PORT_FOR_S1U                         = 2152; # Spec 2152
++    }; 
++    
++  }
++);
++
++DU = (
++    {
++	DU_INTERFACE_NAME_FOR_F1U           = "lo";
++	DU_IPV4_ADDRESS_FOR_F1U             = "127.0.0.1/16";
++	DU_PORT_FOR_F1U                     = 22100;
++	F1_U_DU_TRANSPORT_TYPE		    = "TCP";
++    }
++    );
++    
++CU = (
++    {     
++        CU_INTERFACE_NAME_FOR_F1U           = "lo";
++        CU_IPV4_ADDRESS_FOR_F1U             = "127.0.0.1";   //Address to search the DU
++        CU_PORT_FOR_F1U                     = 22100;
++        F1_U_CU_TRANSPORT_TYPE              = "TCP";	     // One of TCP/UDP/SCTP
++        DU_TYPE 			    = "LTE";
++    }//,
++//    {     
++//        CU_INTERFACE_NAME_FOR_F1U           = "eth0";
++//        CU_IPV4_ADDRESS_FOR_F1U             = "10.64.93.142";   //Address to search the DU
++//        CU_PORT_FOR_F1U                     = 2211;
++//        F1_U_CU_TRANSPORT_TYPE              = "TCP";          // One of TCP/UDP/SCTP
++//        DU_TYPE 			    = "WiFi";
++//    }
++    );
++
++    CU_BALANCING = "ALL";
++
++MACRLCs = (
++	{
++	num_cc = 1;
++	tr_s_preference = "local_L1";
++	tr_n_preference = "local_RRC";
++	phy_test_mode = 0;
++        puSch10xSnr     =  200;
++        puCch10xSnr     =  200;
++        }  
++);
++
++L1s = (
++    	{
++	num_cc = 1;
++	tr_n_preference = "local_mac";
++        }  
++);
++
++RUs = (
++    {		  
++       local_rf       = "yes"
++         nb_tx          = 1
++         nb_rx          = 1
++         att_tx         = 0
++         att_rx         = 0;
++         bands          = [7];
++         max_pdschReferenceSignalPower = -27;
++         max_rxgain                    = 125;
++         eNB_instances  = [0];
++
++    }
++);  
++
++NETWORK_CONTROLLER :
++{
++    FLEXRAN_ENABLED        = "no";
++    FLEXRAN_INTERFACE_NAME = "lo";
++    FLEXRAN_IPV4_ADDRESS   = "127.0.0.1";
++    FLEXRAN_PORT           = 2210;
++    FLEXRAN_CACHE          = "/mnt/oai_agent_cache";
++    FLEXRAN_AWAIT_RECONF   = "no";
++};
++
++THREAD_STRUCT = (
++  {
++    #three config for level of parallelism "PARALLEL_SINGLE_THREAD", "PARALLEL_RU_L1_SPLIT", or "PARALLEL_RU_L1_TRX_SPLIT"
++    parallel_config    = "PARALLEL_RU_L1_TRX_SPLIT";
++    #two option for worker "WORKER_DISABLE" or "WORKER_ENABLE"
++    worker_config      = "WORKER_ENABLE";
++  }
++);
++
++     log_config :
++     {
++       global_log_level                      ="info";
++       global_log_verbosity                  ="medium";
++       hw_log_level                          ="info";
++       hw_log_verbosity                      ="medium";
++       phy_log_level                         ="info";
++       phy_log_verbosity                     ="medium";
++       mac_log_level                         ="info";
++       mac_log_verbosity                     ="medium";
++       rlc_log_level                         ="info";
++       rlc_log_verbosity                     ="medium";
++       pdcp_log_level                        ="debug";
++       pdcp_log_verbosity                    ="medium";
++       rrc_log_level                         ="debug";
++       rrc_log_verbosity                     ="medium";
++    };
++
+diff --git a/targets/PROJECTS/GENERIC-LTE-EPC/CONF/mimo.conf b/targets/PROJECTS/GENERIC-LTE-EPC/CONF/mimo.conf
+new file mode 100644
+index 000000000..e5ceaedaf
+--- /dev/null
++++ b/targets/PROJECTS/GENERIC-LTE-EPC/CONF/mimo.conf
+@@ -0,0 +1,298 @@
++Active_eNBs = ( "eNB-Eurecom-LTEBox");
++# Asn1_verbosity, choice in: none, info, annoying
++Asn1_verbosity = "none";
++
++eNBs =
++(
++ {
++    ////////// Identification parameters:
++    eNB_ID    =  0xe00;
++
++    cell_type =  "CELL_MACRO_ENB";
++
++    eNB_name  =  "eNB-Eurecom-LTEBox";
++
++    // Tracking area code, 0x0000 and 0xfffe are reserved values
++    tracking_area_code  =  1;
++
++    plmn_list = ( { mcc = 901; mnc = 70; mnc_length = 2; } );
++
++    tr_s_preference     = "local_mac"
++
++    ////////// Physical parameters:
++
++    component_carriers = (
++      {
++      node_function             = "3GPP_eNODEB";
++      node_timing               = "synch_to_ext_device";
++      node_synch_ref            = 0;
++      frame_type					      = "FDD";
++      tdd_config 					      = 3;
++      tdd_config_s            			      = 0;
++      prefix_type             			      = "NORMAL";
++      eutra_band              			      = 7;
++      downlink_frequency      			      = 2680000000L;
++      uplink_frequency_offset 			      = -120000000;
++      Nid_cell					      = 0;
++      N_RB_DL                 			      = 25;
++      Nid_cell_mbsfn          			      = 0;
++      nb_antenna_ports                                = 2;
++      nb_antennas_tx          			      = 2;
++      nb_antennas_rx          			      = 2;
++      tx_gain                                            = 90;
++      rx_gain                                            = 125;
++      pbch_repetition                                 = "FALSE";
++      prach_root              			      = 0;
++      prach_config_index      			      = 0;
++      prach_high_speed        			      = "DISABLE";
++      prach_zero_correlation  			      = 1;
++      prach_freq_offset       			      = 2;
++      pucch_delta_shift       			      = 1;
++      pucch_nRB_CQI           			      = 0;
++      pucch_nCS_AN            			      = 0;
++      pucch_n1_AN             			      = 0;
++      pdsch_referenceSignalPower 			      = -25;
++      pdsch_p_b                  			      = 0;
++      pusch_n_SB                 			      = 1;
++      pusch_enable64QAM          			      = "ENABLE";
++      pusch_hoppingMode                                  = "interSubFrame";
++      pusch_hoppingOffset                                = 0;
++      pusch_groupHoppingEnabled  			      = "ENABLE";
++      pusch_groupAssignment      			      = 0;
++      pusch_sequenceHoppingEnabled		   	      = "DISABLE";
++      pusch_nDMRS1                                       = 1;
++      phich_duration                                     = "NORMAL";
++      phich_resource                                     = "ONESIXTH";
++      srs_enable                                         = "DISABLE";
++      /*  srs_BandwidthConfig                                =;
++      srs_SubframeConfig                                 =;
++      srs_ackNackST                                      =;
++      srs_MaxUpPts                                       =;*/
++
++      pusch_p0_Nominal                                   = -96;
++      pusch_alpha                                        = "AL1";
++      pucch_p0_Nominal                                   = -104;
++      msg3_delta_Preamble                                = 6;
++      pucch_deltaF_Format1                               = "deltaF2";
++      pucch_deltaF_Format1b                              = "deltaF3";
++      pucch_deltaF_Format2                               = "deltaF0";
++      pucch_deltaF_Format2a                              = "deltaF0";
++      pucch_deltaF_Format2b		    	      = "deltaF0";
++
++      rach_numberOfRA_Preambles                          = 64;
++      rach_preamblesGroupAConfig                         = "DISABLE";
++      /*
++      rach_sizeOfRA_PreamblesGroupA                      = ;
++      rach_messageSizeGroupA                             = ;
++      rach_messagePowerOffsetGroupB                      = ;
++      */
++      rach_powerRampingStep                              = 4;
++      rach_preambleInitialReceivedTargetPower            = -108;
++      rach_preambleTransMax                              = 10;
++      rach_raResponseWindowSize                          = 10;
++      rach_macContentionResolutionTimer                  = 48;
++      rach_maxHARQ_Msg3Tx                                = 4;
++
++      pcch_default_PagingCycle                           = 128;
++      pcch_nB                                            = "oneT";
++      bcch_modificationPeriodCoeff			      = 2;
++      ue_TimersAndConstants_t300			      = 1000;
++      ue_TimersAndConstants_t301			      = 1000;
++      ue_TimersAndConstants_t310			      = 1000;
++      ue_TimersAndConstants_t311			      = 10000;
++      ue_TimersAndConstants_n310			      = 20;
++      ue_TimersAndConstants_n311			      = 1;
++      ue_TransmissionMode                                    = 2;
++
++      //Parameters for SIB18
++      rxPool_sc_CP_Len                                       = "normal";
++      rxPool_sc_Period                                       = "sf40";
++      rxPool_data_CP_Len                                     = "normal";
++      rxPool_ResourceConfig_prb_Num                          = 20;
++      rxPool_ResourceConfig_prb_Start                        = 5;
++      rxPool_ResourceConfig_prb_End                          = 44;
++      rxPool_ResourceConfig_offsetIndicator_present          = "prSmall";
++      rxPool_ResourceConfig_offsetIndicator_choice           = 0;
++      rxPool_ResourceConfig_subframeBitmap_present           = "prBs40";
++      rxPool_ResourceConfig_subframeBitmap_choice_bs_buf              = "00000000000000000000";
++      rxPool_ResourceConfig_subframeBitmap_choice_bs_size             = 5;
++      rxPool_ResourceConfig_subframeBitmap_choice_bs_bits_unused      = 0;
++/*    rxPool_dataHoppingConfig_hoppingParameter                       = 0;
++      rxPool_dataHoppingConfig_numSubbands                            = "ns1";
++      rxPool_dataHoppingConfig_rbOffset                               = 0;
++      rxPool_commTxResourceUC-ReqAllowed                              = "TRUE";
++*/
++      // Parameters for SIB19
++      discRxPool_cp_Len                                               = "normal"
++      discRxPool_discPeriod                                           = "rf32"
++      discRxPool_numRetx                                              = 1;
++      discRxPool_numRepetition                                        = 2;
++      discRxPool_ResourceConfig_prb_Num                               = 5;
++      discRxPool_ResourceConfig_prb_Start                             = 3;
++      discRxPool_ResourceConfig_prb_End                               = 21;
++      discRxPool_ResourceConfig_offsetIndicator_present               = "prSmall";
++      discRxPool_ResourceConfig_offsetIndicator_choice                = 0;
++      discRxPool_ResourceConfig_subframeBitmap_present                = "prBs40";
++      discRxPool_ResourceConfig_subframeBitmap_choice_bs_buf          = "f0ffffffff";
++      discRxPool_ResourceConfig_subframeBitmap_choice_bs_size         = 5;
++      discRxPool_ResourceConfig_subframeBitmap_choice_bs_bits_unused  = 0;
++
++      }
++    );
++
++
++    srb1_parameters :
++    {
++        # timer_poll_retransmit = (ms) [5, 10, 15, 20,... 250, 300, 350, ... 500]
++        timer_poll_retransmit    = 80;
++
++        # timer_reordering = (ms) [0,5, ... 100, 110, 120, ... ,200]
++        timer_reordering         = 35;
++
++        # timer_reordering = (ms) [0,5, ... 250, 300, 350, ... ,500]
++        timer_status_prohibit    = 0;
++
++        # poll_pdu = [4, 8, 16, 32 , 64, 128, 256, infinity(>10000)]
++        poll_pdu                 =  4;
++
++        # poll_byte = (kB) [25,50,75,100,125,250,375,500,750,1000,1250,1500,2000,3000,infinity(>10000)]
++        poll_byte                =  99999;
++
++        # max_retx_threshold = [1, 2, 3, 4 , 6, 8, 16, 32]
++        max_retx_threshold       =  4;
++    }
++
++    # ------- SCTP definitions
++    SCTP :
++    {
++        # Number of streams to use in input/output
++        SCTP_INSTREAMS  = 2;
++        SCTP_OUTSTREAMS = 2;
++    };
++
++
++    ////////// MME parameters:
++    mme_ip_address      = ( { ipv4       = "192.168.60.142";
++                              ipv6       = "192:168:30::17";
++                              active     = "yes";
++                              preference = "ipv4";
++                            }
++                          );
++
++    enable_measurement_reports = "no";
++
++    ///X2
++    enable_x2 = "no";
++    t_reloc_prep      = 1000;      /* unit: millisecond */
++    tx2_reloc_overall = 2000;      /* unit: millisecond */
++
++    NETWORK_INTERFACES :
++    {
++        ENB_INTERFACE_NAME_FOR_S1_MME            = "vboxnet0";
++        ENB_IPV4_ADDRESS_FOR_S1_MME              = "192.168.60.1";
++        ENB_INTERFACE_NAME_FOR_S1U               = "vboxnet0";
++        ENB_IPV4_ADDRESS_FOR_S1U                 = "192.168.60.1";
++        ENB_PORT_FOR_S1U                         = 2152; # Spec 2152
++    }; 
++    
++  }
++);
++
++DU = (
++    {
++	DU_INTERFACE_NAME_FOR_F1U           = "lo";
++	DU_IPV4_ADDRESS_FOR_F1U             = "127.0.0.1/16";
++	DU_PORT_FOR_F1U                     = 22100;
++	F1_U_DU_TRANSPORT_TYPE		    = "TCP";
++    }
++    );
++    
++CU = (
++    {     
++        CU_INTERFACE_NAME_FOR_F1U           = "lo";
++        CU_IPV4_ADDRESS_FOR_F1U             = "127.0.0.1";   //Address to search the DU
++        CU_PORT_FOR_F1U                     = 22100;
++        F1_U_CU_TRANSPORT_TYPE              = "TCP";	     // One of TCP/UDP/SCTP
++        DU_TYPE 			    = "LTE";
++    }//,
++//    {     
++//        CU_INTERFACE_NAME_FOR_F1U           = "eth0";
++//        CU_IPV4_ADDRESS_FOR_F1U             = "10.64.93.142";   //Address to search the DU
++//        CU_PORT_FOR_F1U                     = 2211;
++//        F1_U_CU_TRANSPORT_TYPE              = "TCP";          // One of TCP/UDP/SCTP
++//        DU_TYPE 			    = "WiFi";
++//    }
++    );
++
++    CU_BALANCING = "ALL";
++
++MACRLCs = (
++	{
++	num_cc = 1;
++	tr_s_preference = "local_L1";
++	tr_n_preference = "local_RRC";
++	phy_test_mode = 0;
++        puSch10xSnr     =  200;
++        puCch10xSnr     =  200;
++        }  
++);
++
++L1s = (
++    	{
++	num_cc = 1;
++	tr_n_preference = "local_mac";
++        }  
++);
++
++RUs = (
++    {		  
++       local_rf       = "yes"
++         nb_tx          = 2
++         nb_rx          = 2
++         att_tx         = 0
++         att_rx         = 0;
++         bands          = [7];
++         max_pdschReferenceSignalPower = -27;
++         max_rxgain                    = 115;
++         eNB_instances  = [0];
++
++    }
++);  
++
++NETWORK_CONTROLLER :
++{
++    FLEXRAN_ENABLED        = "no";
++    FLEXRAN_INTERFACE_NAME = "lo";
++    FLEXRAN_IPV4_ADDRESS   = "127.0.0.1";
++    FLEXRAN_PORT           = 2210;
++    FLEXRAN_CACHE          = "/mnt/oai_agent_cache";
++    FLEXRAN_AWAIT_RECONF   = "no";
++};
++
++THREAD_STRUCT = (
++  {
++    #three config for level of parallelism "PARALLEL_SINGLE_THREAD", "PARALLEL_RU_L1_SPLIT", or "PARALLEL_RU_L1_TRX_SPLIT"
++    parallel_config    = "PARALLEL_RU_L1_TRX_SPLIT";
++    #two option for worker "WORKER_DISABLE" or "WORKER_ENABLE"
++    worker_config      = "WORKER_ENABLE";
++  }
++);
++
++     log_config :
++     {
++       global_log_level                      ="info";
++       global_log_verbosity                  ="medium";
++       hw_log_level                          ="info";
++       hw_log_verbosity                      ="medium";
++       phy_log_level                         ="info";
++       phy_log_verbosity                     ="medium";
++       mac_log_level                         ="error";
++       mac_log_verbosity                     ="medium";
++       rlc_log_level                         ="error";
++       rlc_log_verbosity                     ="medium";
++       pdcp_log_level                        ="error";
++       pdcp_log_verbosity                    ="medium";
++       rrc_log_level                         ="error";
++       rrc_log_verbosity                     ="medium";
++    };
++
+diff --git a/targets/PROJECTS/GENERIC-LTE-EPC/CONF/test.conf b/targets/PROJECTS/GENERIC-LTE-EPC/CONF/test.conf
+new file mode 100644
+index 000000000..14f0f3224
+--- /dev/null
++++ b/targets/PROJECTS/GENERIC-LTE-EPC/CONF/test.conf
+@@ -0,0 +1,298 @@
++Active_eNBs = ( "eNB-Eurecom-LTEBox");
++# Asn1_verbosity, choice in: none, info, annoying
++Asn1_verbosity = "none";
++
++eNBs =
++(
++ {
++    ////////// Identification parameters:
++    eNB_ID    =  0xe00;
++
++    cell_type =  "CELL_MACRO_ENB";
++
++    eNB_name  =  "eNB-Eurecom-LTEBox";
++
++    // Tracking area code, 0x0000 and 0xfffe are reserved values
++    tracking_area_code  =  1;
++
++    plmn_list = ( { mcc = 901; mnc = 70; mnc_length = 2; } );
++
++    tr_s_preference     = "local_mac"
++
++    ////////// Physical parameters:
++
++    component_carriers = (
++      {
++      node_function             = "3GPP_eNODEB";
++      node_timing               = "synch_to_ext_device";
++      node_synch_ref            = 0;
++      frame_type					      = "FDD";
++      tdd_config 					      = 3;
++      tdd_config_s            			      = 0;
++      prefix_type             			      = "NORMAL";
++      eutra_band              			      = 7;
++      downlink_frequency      			      = 2685000000L;
++      uplink_frequency_offset 			      = -120000000;
++      Nid_cell					      = 0;
++      N_RB_DL                 			      = 50;
++      Nid_cell_mbsfn          			      = 0;
++      nb_antenna_ports                                = 1;
++      nb_antennas_tx          			      = 1;
++      nb_antennas_rx          			      = 1;
++      tx_gain                                            = 90;
++      rx_gain                                            = 125;
++      pbch_repetition                                 = "FALSE";
++      prach_root              			      = 0;
++      prach_config_index      			      = 0;
++      prach_high_speed        			      = "DISABLE";
++      prach_zero_correlation  			      = 1;
++      prach_freq_offset       			      = 2;
++      pucch_delta_shift       			      = 1;
++      pucch_nRB_CQI           			      = 0;
++      pucch_nCS_AN            			      = 0;
++      pucch_n1_AN             			      = 0;
++      pdsch_referenceSignalPower 			      = -27;
++      pdsch_p_b                  			      = 0;
++      pusch_n_SB                 			      = 1;
++      pusch_enable64QAM          			      = "ENABLE";
++      pusch_hoppingMode                                  = "interSubFrame";
++      pusch_hoppingOffset                                = 0;
++      pusch_groupHoppingEnabled  			      = "ENABLE";
++      pusch_groupAssignment      			      = 0;
++      pusch_sequenceHoppingEnabled		   	      = "DISABLE";
++      pusch_nDMRS1                                       = 1;
++      phich_duration                                     = "NORMAL";
++      phich_resource                                     = "ONESIXTH";
++      srs_enable                                         = "DISABLE";
++      /*  srs_BandwidthConfig                                =;
++      srs_SubframeConfig                                 =;
++      srs_ackNackST                                      =;
++      srs_MaxUpPts                                       =;*/
++
++      pusch_p0_Nominal                                   = -96;
++      pusch_alpha                                        = "AL1";
++      pucch_p0_Nominal                                   = -104;
++      msg3_delta_Preamble                                = 6;
++      pucch_deltaF_Format1                               = "deltaF2";
++      pucch_deltaF_Format1b                              = "deltaF3";
++      pucch_deltaF_Format2                               = "deltaF0";
++      pucch_deltaF_Format2a                              = "deltaF0";
++      pucch_deltaF_Format2b		    	      = "deltaF0";
++
++      rach_numberOfRA_Preambles                          = 64;
++      rach_preamblesGroupAConfig                         = "DISABLE";
++      /*
++      rach_sizeOfRA_PreamblesGroupA                      = ;
++      rach_messageSizeGroupA                             = ;
++      rach_messagePowerOffsetGroupB                      = ;
++      */
++      rach_powerRampingStep                              = 4;
++      rach_preambleInitialReceivedTargetPower            = -108;
++      rach_preambleTransMax                              = 10;
++      rach_raResponseWindowSize                          = 10;
++      rach_macContentionResolutionTimer                  = 48;
++      rach_maxHARQ_Msg3Tx                                = 4;
++
++      pcch_default_PagingCycle                           = 128;
++      pcch_nB                                            = "oneT";
++      bcch_modificationPeriodCoeff			      = 2;
++      ue_TimersAndConstants_t300			      = 1000;
++      ue_TimersAndConstants_t301			      = 1000;
++      ue_TimersAndConstants_t310			      = 1000;
++      ue_TimersAndConstants_t311			      = 10000;
++      ue_TimersAndConstants_n310			      = 20;
++      ue_TimersAndConstants_n311			      = 1;
++      ue_TransmissionMode                                    = 1;
++
++      //Parameters for SIB18
++      rxPool_sc_CP_Len                                       = "normal";
++      rxPool_sc_Period                                       = "sf40";
++      rxPool_data_CP_Len                                     = "normal";
++      rxPool_ResourceConfig_prb_Num                          = 20;
++      rxPool_ResourceConfig_prb_Start                        = 5;
++      rxPool_ResourceConfig_prb_End                          = 44;
++      rxPool_ResourceConfig_offsetIndicator_present          = "prSmall";
++      rxPool_ResourceConfig_offsetIndicator_choice           = 0;
++      rxPool_ResourceConfig_subframeBitmap_present           = "prBs40";
++      rxPool_ResourceConfig_subframeBitmap_choice_bs_buf              = "00000000000000000000";
++      rxPool_ResourceConfig_subframeBitmap_choice_bs_size             = 5;
++      rxPool_ResourceConfig_subframeBitmap_choice_bs_bits_unused      = 0;
++/*    rxPool_dataHoppingConfig_hoppingParameter                       = 0;
++      rxPool_dataHoppingConfig_numSubbands                            = "ns1";
++      rxPool_dataHoppingConfig_rbOffset                               = 0;
++      rxPool_commTxResourceUC-ReqAllowed                              = "TRUE";
++*/
++      // Parameters for SIB19
++      discRxPool_cp_Len                                               = "normal"
++      discRxPool_discPeriod                                           = "rf32"
++      discRxPool_numRetx                                              = 1;
++      discRxPool_numRepetition                                        = 2;
++      discRxPool_ResourceConfig_prb_Num                               = 5;
++      discRxPool_ResourceConfig_prb_Start                             = 3;
++      discRxPool_ResourceConfig_prb_End                               = 21;
++      discRxPool_ResourceConfig_offsetIndicator_present               = "prSmall";
++      discRxPool_ResourceConfig_offsetIndicator_choice                = 0;
++      discRxPool_ResourceConfig_subframeBitmap_present                = "prBs40";
++      discRxPool_ResourceConfig_subframeBitmap_choice_bs_buf          = "f0ffffffff";
++      discRxPool_ResourceConfig_subframeBitmap_choice_bs_size         = 5;
++      discRxPool_ResourceConfig_subframeBitmap_choice_bs_bits_unused  = 0;
++
++      }
++    );
++
++
++    srb1_parameters :
++    {
++        # timer_poll_retransmit = (ms) [5, 10, 15, 20,... 250, 300, 350, ... 500]
++        timer_poll_retransmit    = 80;
++
++        # timer_reordering = (ms) [0,5, ... 100, 110, 120, ... ,200]
++        timer_reordering         = 35;
++
++        # timer_reordering = (ms) [0,5, ... 250, 300, 350, ... ,500]
++        timer_status_prohibit    = 0;
++
++        # poll_pdu = [4, 8, 16, 32 , 64, 128, 256, infinity(>10000)]
++        poll_pdu                 =  4;
++
++        # poll_byte = (kB) [25,50,75,100,125,250,375,500,750,1000,1250,1500,2000,3000,infinity(>10000)]
++        poll_byte                =  99999;
++
++        # max_retx_threshold = [1, 2, 3, 4 , 6, 8, 16, 32]
++        max_retx_threshold       =  4;
++    }
++
++    # ------- SCTP definitions
++    SCTP :
++    {
++        # Number of streams to use in input/output
++        SCTP_INSTREAMS  = 2;
++        SCTP_OUTSTREAMS = 2;
++    };
++
++
++    ////////// MME parameters:
++    mme_ip_address      = ( { ipv4       = "192.168.60.142";
++                              ipv6       = "192:168:30::17";
++                              active     = "yes";
++                              preference = "ipv4";
++                            }
++                          );
++
++    enable_measurement_reports = "no";
++
++    ///X2
++    enable_x2 = "no";
++    t_reloc_prep      = 1000;      /* unit: millisecond */
++    tx2_reloc_overall = 2000;      /* unit: millisecond */
++
++    NETWORK_INTERFACES :
++    {
++        ENB_INTERFACE_NAME_FOR_S1_MME            = "vboxnet0";
++        ENB_IPV4_ADDRESS_FOR_S1_MME              = "192.168.60.1";
++        ENB_INTERFACE_NAME_FOR_S1U               = "vboxnet0";
++        ENB_IPV4_ADDRESS_FOR_S1U                 = "192.168.60.1";
++        ENB_PORT_FOR_S1U                         = 2152; # Spec 2152
++    }; 
++    
++  }
++);
++
++DU = (
++    {
++	DU_INTERFACE_NAME_FOR_F1U           = "lo";
++	DU_IPV4_ADDRESS_FOR_F1U             = "127.0.0.1/16";
++	DU_PORT_FOR_F1U                     = 22100;
++	F1_U_DU_TRANSPORT_TYPE		    = "TCP";
++    }
++    );
++    
++CU = (
++    {     
++        CU_INTERFACE_NAME_FOR_F1U           = "lo";
++        CU_IPV4_ADDRESS_FOR_F1U             = "127.0.0.1";   //Address to search the DU
++        CU_PORT_FOR_F1U                     = 22100;
++        F1_U_CU_TRANSPORT_TYPE              = "TCP";	     // One of TCP/UDP/SCTP
++        DU_TYPE 			    = "LTE";
++    }//,
++//    {     
++//        CU_INTERFACE_NAME_FOR_F1U           = "eth0";
++//        CU_IPV4_ADDRESS_FOR_F1U             = "10.64.93.142";   //Address to search the DU
++//        CU_PORT_FOR_F1U                     = 2211;
++//        F1_U_CU_TRANSPORT_TYPE              = "TCP";          // One of TCP/UDP/SCTP
++//        DU_TYPE 			    = "WiFi";
++//    }
++    );
++
++    CU_BALANCING = "ALL";
++
++MACRLCs = (
++	{
++	num_cc = 1;
++	tr_s_preference = "local_L1";
++	tr_n_preference = "local_RRC";
++	phy_test_mode = 0;
++        puSch10xSnr     =  200;
++        puCch10xSnr     =  200;
++        }  
++);
++
++L1s = (
++    	{
++	num_cc = 1;
++	tr_n_preference = "local_mac";
++        }  
++);
++
++RUs = (
++    {		  
++       local_rf       = "yes"
++         nb_tx          = 1
++         nb_rx          = 1
++         att_tx         = 0
++         att_rx         = 0;
++         bands          = [7];
++         max_pdschReferenceSignalPower = -27;
++         max_rxgain                    = 125;
++         eNB_instances  = [0];
++
++    }
++);  
++
++NETWORK_CONTROLLER :
++{
++    FLEXRAN_ENABLED        = "no";
++    FLEXRAN_INTERFACE_NAME = "lo";
++    FLEXRAN_IPV4_ADDRESS   = "127.0.0.1";
++    FLEXRAN_PORT           = 2210;
++    FLEXRAN_CACHE          = "/mnt/oai_agent_cache";
++    FLEXRAN_AWAIT_RECONF   = "no";
++};
++
++THREAD_STRUCT = (
++  {
++    #three config for level of parallelism "PARALLEL_SINGLE_THREAD", "PARALLEL_RU_L1_SPLIT", or "PARALLEL_RU_L1_TRX_SPLIT"
++    parallel_config    = "PARALLEL_RU_L1_TRX_SPLIT";
++    #two option for worker "WORKER_DISABLE" or "WORKER_ENABLE"
++    worker_config      = "WORKER_ENABLE";
++  }
++);
++
++     log_config :
++     {
++       global_log_level                      ="info";
++       global_log_verbosity                  ="medium";
++       hw_log_level                          ="error";
++       hw_log_verbosity                      ="medium";
++       phy_log_level                         ="error";
++       phy_log_verbosity                     ="medium";
++       mac_log_level                         ="error";
++       mac_log_verbosity                     ="medium";
++       rlc_log_level                         ="error";
++       rlc_log_verbosity                     ="medium";
++       pdcp_log_level                        ="error";
++       pdcp_log_verbosity                    ="medium";
++       rrc_log_level                         ="error";
++       rrc_log_verbosity                     ="medium";
++    };
++
+diff --git a/targets/PROJECTS/GENERIC-LTE-EPC/CONF/wide.conf b/targets/PROJECTS/GENERIC-LTE-EPC/CONF/wide.conf
+new file mode 100644
+index 000000000..1d2672b96
+--- /dev/null
++++ b/targets/PROJECTS/GENERIC-LTE-EPC/CONF/wide.conf
+@@ -0,0 +1,298 @@
++Active_eNBs = ( "eNB-Eurecom-LTEBox");
++# Asn1_verbosity, choice in: none, info, annoying
++Asn1_verbosity = "none";
++
++eNBs =
++(
++ {
++    ////////// Identification parameters:
++    eNB_ID    =  0xe00;
++
++    cell_type =  "CELL_MACRO_ENB";
++
++    eNB_name  =  "eNB-Eurecom-LTEBox";
++
++    // Tracking area code, 0x0000 and 0xfffe are reserved values
++    tracking_area_code  =  1;
++
++    plmn_list = ( { mcc = 901; mnc = 70; mnc_length = 2; } );
++
++    tr_s_preference     = "local_mac"
++
++    ////////// Physical parameters:
++
++    component_carriers = (
++      {
++      node_function             = "3GPP_eNODEB";
++      node_timing               = "synch_to_ext_device";
++      node_synch_ref            = 0;
++      frame_type					      = "FDD";
++      tdd_config 					      = 3;
++      tdd_config_s            			      = 0;
++      prefix_type             			      = "NORMAL";
++      eutra_band              			      = 7;
++      downlink_frequency      			      = 2680000000L;
++      uplink_frequency_offset 			      = -120000000;
++      Nid_cell					      = 0;
++      N_RB_DL                 			      = 100;
++      Nid_cell_mbsfn          			      = 0;
++      nb_antenna_ports                                = 1;
++      nb_antennas_tx          			      = 1;
++      nb_antennas_rx          			      = 1;
++      tx_gain                                            = 90;
++      rx_gain                                            = 125;
++      pbch_repetition                                 = "FALSE";
++      prach_root              			      = 0;
++      prach_config_index      			      = 0;
++      prach_high_speed        			      = "DISABLE";
++      prach_zero_correlation  			      = 1;
++      prach_freq_offset       			      = 2;
++      pucch_delta_shift       			      = 1;
++      pucch_nRB_CQI           			      = 0;
++      pucch_nCS_AN            			      = 0;
++      pucch_n1_AN             			      = 0;
++      pdsch_referenceSignalPower 			      = -27;
++      pdsch_p_b                  			      = 0;
++      pusch_n_SB                 			      = 1;
++      pusch_enable64QAM          			      = "ENABLE";
++      pusch_hoppingMode                                  = "interSubFrame";
++      pusch_hoppingOffset                                = 0;
++      pusch_groupHoppingEnabled  			      = "ENABLE";
++      pusch_groupAssignment      			      = 0;
++      pusch_sequenceHoppingEnabled		   	      = "DISABLE";
++      pusch_nDMRS1                                       = 1;
++      phich_duration                                     = "NORMAL";
++      phich_resource                                     = "ONESIXTH";
++      srs_enable                                         = "DISABLE";
++      /*  srs_BandwidthConfig                                =;
++      srs_SubframeConfig                                 =;
++      srs_ackNackST                                      =;
++      srs_MaxUpPts                                       =;*/
++
++      pusch_p0_Nominal                                   = -96;
++      pusch_alpha                                        = "AL1";
++      pucch_p0_Nominal                                   = -104;
++      msg3_delta_Preamble                                = 6;
++      pucch_deltaF_Format1                               = "deltaF2";
++      pucch_deltaF_Format1b                              = "deltaF3";
++      pucch_deltaF_Format2                               = "deltaF0";
++      pucch_deltaF_Format2a                              = "deltaF0";
++      pucch_deltaF_Format2b		    	      = "deltaF0";
++
++      rach_numberOfRA_Preambles                          = 64;
++      rach_preamblesGroupAConfig                         = "DISABLE";
++      /*
++      rach_sizeOfRA_PreamblesGroupA                      = ;
++      rach_messageSizeGroupA                             = ;
++      rach_messagePowerOffsetGroupB                      = ;
++      */
++      rach_powerRampingStep                              = 4;
++      rach_preambleInitialReceivedTargetPower            = -108;
++      rach_preambleTransMax                              = 10;
++      rach_raResponseWindowSize                          = 10;
++      rach_macContentionResolutionTimer                  = 48;
++      rach_maxHARQ_Msg3Tx                                = 4;
++
++      pcch_default_PagingCycle                           = 128;
++      pcch_nB                                            = "oneT";
++      bcch_modificationPeriodCoeff			      = 2;
++      ue_TimersAndConstants_t300			      = 1000;
++      ue_TimersAndConstants_t301			      = 1000;
++      ue_TimersAndConstants_t310			      = 1000;
++      ue_TimersAndConstants_t311			      = 10000;
++      ue_TimersAndConstants_n310			      = 20;
++      ue_TimersAndConstants_n311			      = 1;
++      ue_TransmissionMode                                    = 1;
++
++      //Parameters for SIB18
++      rxPool_sc_CP_Len                                       = "normal";
++      rxPool_sc_Period                                       = "sf40";
++      rxPool_data_CP_Len                                     = "normal";
++      rxPool_ResourceConfig_prb_Num                          = 20;
++      rxPool_ResourceConfig_prb_Start                        = 5;
++      rxPool_ResourceConfig_prb_End                          = 44;
++      rxPool_ResourceConfig_offsetIndicator_present          = "prSmall";
++      rxPool_ResourceConfig_offsetIndicator_choice           = 0;
++      rxPool_ResourceConfig_subframeBitmap_present           = "prBs40";
++      rxPool_ResourceConfig_subframeBitmap_choice_bs_buf              = "00000000000000000000";
++      rxPool_ResourceConfig_subframeBitmap_choice_bs_size             = 5;
++      rxPool_ResourceConfig_subframeBitmap_choice_bs_bits_unused      = 0;
++/*    rxPool_dataHoppingConfig_hoppingParameter                       = 0;
++      rxPool_dataHoppingConfig_numSubbands                            = "ns1";
++      rxPool_dataHoppingConfig_rbOffset                               = 0;
++      rxPool_commTxResourceUC-ReqAllowed                              = "TRUE";
++*/
++      // Parameters for SIB19
++      discRxPool_cp_Len                                               = "normal"
++      discRxPool_discPeriod                                           = "rf32"
++      discRxPool_numRetx                                              = 1;
++      discRxPool_numRepetition                                        = 2;
++      discRxPool_ResourceConfig_prb_Num                               = 5;
++      discRxPool_ResourceConfig_prb_Start                             = 3;
++      discRxPool_ResourceConfig_prb_End                               = 21;
++      discRxPool_ResourceConfig_offsetIndicator_present               = "prSmall";
++      discRxPool_ResourceConfig_offsetIndicator_choice                = 0;
++      discRxPool_ResourceConfig_subframeBitmap_present                = "prBs40";
++      discRxPool_ResourceConfig_subframeBitmap_choice_bs_buf          = "f0ffffffff";
++      discRxPool_ResourceConfig_subframeBitmap_choice_bs_size         = 5;
++      discRxPool_ResourceConfig_subframeBitmap_choice_bs_bits_unused  = 0;
++
++      }
++    );
++
++
++    srb1_parameters :
++    {
++        # timer_poll_retransmit = (ms) [5, 10, 15, 20,... 250, 300, 350, ... 500]
++        timer_poll_retransmit    = 80;
++
++        # timer_reordering = (ms) [0,5, ... 100, 110, 120, ... ,200]
++        timer_reordering         = 35;
++
++        # timer_reordering = (ms) [0,5, ... 250, 300, 350, ... ,500]
++        timer_status_prohibit    = 0;
++
++        # poll_pdu = [4, 8, 16, 32 , 64, 128, 256, infinity(>10000)]
++        poll_pdu                 =  4;
++
++        # poll_byte = (kB) [25,50,75,100,125,250,375,500,750,1000,1250,1500,2000,3000,infinity(>10000)]
++        poll_byte                =  99999;
++
++        # max_retx_threshold = [1, 2, 3, 4 , 6, 8, 16, 32]
++        max_retx_threshold       =  4;
++    }
++
++    # ------- SCTP definitions
++    SCTP :
++    {
++        # Number of streams to use in input/output
++        SCTP_INSTREAMS  = 2;
++        SCTP_OUTSTREAMS = 2;
++    };
++
++
++    ////////// MME parameters:
++    mme_ip_address      = ( { ipv4       = "192.168.60.142";
++                              ipv6       = "192:168:30::17";
++                              active     = "yes";
++                              preference = "ipv4";
++                            }
++                          );
++
++    enable_measurement_reports = "no";
++
++    ///X2
++    enable_x2 = "no";
++    t_reloc_prep      = 1000;      /* unit: millisecond */
++    tx2_reloc_overall = 2000;      /* unit: millisecond */
++
++    NETWORK_INTERFACES :
++    {
++        ENB_INTERFACE_NAME_FOR_S1_MME            = "vboxnet0";
++        ENB_IPV4_ADDRESS_FOR_S1_MME              = "192.168.60.1";
++        ENB_INTERFACE_NAME_FOR_S1U               = "vboxnet0";
++        ENB_IPV4_ADDRESS_FOR_S1U                 = "192.168.60.1";
++        ENB_PORT_FOR_S1U                         = 2152; # Spec 2152
++    }; 
++    
++  }
++);
++
++DU = (
++    {
++	DU_INTERFACE_NAME_FOR_F1U           = "lo";
++	DU_IPV4_ADDRESS_FOR_F1U             = "127.0.0.1/16";
++	DU_PORT_FOR_F1U                     = 22100;
++	F1_U_DU_TRANSPORT_TYPE		    = "TCP";
++    }
++    );
++    
++CU = (
++    {     
++        CU_INTERFACE_NAME_FOR_F1U           = "lo";
++        CU_IPV4_ADDRESS_FOR_F1U             = "127.0.0.1";   //Address to search the DU
++        CU_PORT_FOR_F1U                     = 22100;
++        F1_U_CU_TRANSPORT_TYPE              = "TCP";	     // One of TCP/UDP/SCTP
++        DU_TYPE 			    = "LTE";
++    }//,
++//    {     
++//        CU_INTERFACE_NAME_FOR_F1U           = "eth0";
++//        CU_IPV4_ADDRESS_FOR_F1U             = "10.64.93.142";   //Address to search the DU
++//        CU_PORT_FOR_F1U                     = 2211;
++//        F1_U_CU_TRANSPORT_TYPE              = "TCP";          // One of TCP/UDP/SCTP
++//        DU_TYPE 			    = "WiFi";
++//    }
++    );
++
++    CU_BALANCING = "ALL";
++
++MACRLCs = (
++	{
++	num_cc = 1;
++	tr_s_preference = "local_L1";
++	tr_n_preference = "local_RRC";
++	phy_test_mode = 0;
++        puSch10xSnr     =  200;
++        puCch10xSnr     =  200;
++        }  
++);
++
++L1s = (
++    	{
++	num_cc = 1;
++	tr_n_preference = "local_mac";
++        }  
++);
++
++RUs = (
++    {		  
++       local_rf       = "yes"
++         nb_tx          = 1
++         nb_rx          = 1
++         att_tx         = 0
++         att_rx         = 0;
++         bands          = [7];
++         max_pdschReferenceSignalPower = -27;
++         max_rxgain                    = 125;
++         eNB_instances  = [0];
++
++    }
++);  
++
++NETWORK_CONTROLLER :
++{
++    FLEXRAN_ENABLED        = "no";
++    FLEXRAN_INTERFACE_NAME = "lo";
++    FLEXRAN_IPV4_ADDRESS   = "127.0.0.1";
++    FLEXRAN_PORT           = 2210;
++    FLEXRAN_CACHE          = "/mnt/oai_agent_cache";
++    FLEXRAN_AWAIT_RECONF   = "no";
++};
++
++THREAD_STRUCT = (
++  {
++    #three config for level of parallelism "PARALLEL_SINGLE_THREAD", "PARALLEL_RU_L1_SPLIT", or "PARALLEL_RU_L1_TRX_SPLIT"
++    parallel_config    = "PARALLEL_RU_L1_TRX_SPLIT";
++    #two option for worker "WORKER_DISABLE" or "WORKER_ENABLE"
++    worker_config      = "WORKER_ENABLE";
++  }
++);
++
++     log_config :
++     {
++       global_log_level                      ="info";
++       global_log_verbosity                  ="medium";
++       hw_log_level                          ="info";
++       hw_log_verbosity                      ="medium";
++       phy_log_level                         ="info";
++       phy_log_verbosity                     ="medium";
++       mac_log_level                         ="info";
++       mac_log_verbosity                     ="medium";
++       rlc_log_level                         ="error";
++       rlc_log_verbosity                     ="medium";
++       pdcp_log_level                        ="error";
++       pdcp_log_verbosity                    ="medium";
++       rrc_log_level                         ="error";
++       rrc_log_verbosity                     ="medium";
++    };
++
+-- 
+2.24.3 (Apple Git-128)
+
+
+From c390facb33fe79713b48c0f61d4f33c53705ecc6 Mon Sep 17 00:00:00 2001
+From: Zhaowei <tan@cs.ucla.edu>
+Date: Sat, 19 Oct 2019 01:59:54 +0000
+Subject: [PATCH 02/14] test: asn1_msg.c
+
+---
+ openair2/RRC/LTE/MESSAGES/asn1_msg.c | 10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/openair2/RRC/LTE/MESSAGES/asn1_msg.c b/openair2/RRC/LTE/MESSAGES/asn1_msg.c
+index 9303fb79f..afc47f01a 100644
+--- a/openair2/RRC/LTE/MESSAGES/asn1_msg.c
++++ b/openair2/RRC/LTE/MESSAGES/asn1_msg.c
+@@ -871,6 +871,8 @@ uint8_t do_SIB1(rrc_eNB_carrier_data_t *carrier,
+   //  assign_enum(&(*sib1)->cellAccessRelatedInfo.intraFreqReselection,SystemInformationBlockType1__cellAccessRelatedInfo__intraFreqReselection_allowed);
+   (*sib1)->cellAccessRelatedInfo.intraFreqReselection=LTE_SystemInformationBlockType1__cellAccessRelatedInfo__intraFreqReselection_notAllowed;
+   (*sib1)->cellAccessRelatedInfo.csg_Indication=0;
++//Zhehui
++//  (*sib1)->cellSelectionInfo.q_RxLevMin=-65;
+   (*sib1)->cellSelectionInfo.q_RxLevMin=-65;
+   (*sib1)->cellSelectionInfo.q_RxLevMinOffset=NULL;
+   //(*sib1)->p_Max = CALLOC(1, sizeof(P_Max_t));
+@@ -889,7 +891,9 @@ uint8_t do_SIB1(rrc_eNB_carrier_data_t *carrier,
+   //  ASN_SEQUENCE_ADD(&schedulingInfo.sib_MappingInfo.list,NULL);
+ #if defined(ENABLE_ITTI)
+ 
++  //Zhehui
+   if (configuration->frame_type[CC_id] == TDD)
++  //if (true)
+ #endif
+   {
+     (*sib1)->tdd_Config =                             CALLOC(1,sizeof(struct LTE_TDD_Config));
+@@ -3237,9 +3241,9 @@ uint8_t do_RRCConnectionSetup_BR(
+   *logicalchannelgroup=0;
+   SRB1_ul_SpecificParameters->logicalChannelGroup = logicalchannelgroup;
+ 
+-
+-  ASN_SEQUENCE_ADD(&(*SRB_configList)->list,SRB1_config);
+-
++//Zhehui
++  //ASN_SEQUENCE_ADD(&(*SRB_configList)->list,SRB1_config);
++  SRB1_config = NULL;
+   // PhysicalConfigDedicated
+ 
+   physicalConfigDedicated2 = CALLOC(1,sizeof(*physicalConfigDedicated2));
+-- 
+2.24.3 (Apple Git-128)
+
+
+From 801c367d543baf5927f4cd39d8561afb61aedc14 Mon Sep 17 00:00:00 2001
+From: Zhehui Zhang <>
+Date: Sat, 19 Oct 2019 03:29:55 +0000
+Subject: [PATCH 03/14] test asn1_msg with missing optional fieldwq
+
+---
+ openair2/RRC/LTE/MESSAGES/asn1_msg.c | 11 ++++++++---
+ 1 file changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/openair2/RRC/LTE/MESSAGES/asn1_msg.c b/openair2/RRC/LTE/MESSAGES/asn1_msg.c
+index afc47f01a..1b7c7f319 100644
+--- a/openair2/RRC/LTE/MESSAGES/asn1_msg.c
++++ b/openair2/RRC/LTE/MESSAGES/asn1_msg.c
+@@ -2826,7 +2826,9 @@ do_RRCConnectionSetup(
+   logicalchannelgroup = CALLOC(1,sizeof(long));
+   *logicalchannelgroup=0;
+   SRB1_ul_SpecificParameters->logicalChannelGroup = logicalchannelgroup;
++  //Zhehui
+   ASN_SEQUENCE_ADD(&(*SRB_configList)->list,SRB1_config);
++  //free(*SRB_configList);
+   // PhysicalConfigDedicated
+   physicalConfigDedicated2 = CALLOC(1,sizeof(*physicalConfigDedicated2));
+   *physicalConfigDedicated = physicalConfigDedicated2;
+@@ -3088,7 +3090,9 @@ do_RRCConnectionSetup(
+   rrcConnectionSetup->rrc_TransactionIdentifier = Transaction_id;
+   rrcConnectionSetup->criticalExtensions.present = LTE_RRCConnectionSetup__criticalExtensions_PR_c1;
+   rrcConnectionSetup->criticalExtensions.choice.c1.present = LTE_RRCConnectionSetup__criticalExtensions__c1_PR_rrcConnectionSetup_r8 ;
+-  rrcConnectionSetup->criticalExtensions.choice.c1.choice.rrcConnectionSetup_r8.radioResourceConfigDedicated.srb_ToAddModList = *SRB_configList;
++//Zhehui
++  //rrcConnectionSetup->criticalExtensions.choice.c1.choice.rrcConnectionSetup_r8.radioResourceConfigDedicated.srb_ToAddModList = *SRB_configList;
++  rrcConnectionSetup->criticalExtensions.choice.c1.choice.rrcConnectionSetup_r8.radioResourceConfigDedicated.srb_ToAddModList = NULL;
+   rrcConnectionSetup->criticalExtensions.choice.c1.choice.rrcConnectionSetup_r8.radioResourceConfigDedicated.drb_ToAddModList = NULL;
+   rrcConnectionSetup->criticalExtensions.choice.c1.choice.rrcConnectionSetup_r8.radioResourceConfigDedicated.drb_ToReleaseList = NULL;
+   rrcConnectionSetup->criticalExtensions.choice.c1.choice.rrcConnectionSetup_r8.radioResourceConfigDedicated.sps_Config = NULL;
+@@ -3242,8 +3246,9 @@ uint8_t do_RRCConnectionSetup_BR(
+   SRB1_ul_SpecificParameters->logicalChannelGroup = logicalchannelgroup;
+ 
+ //Zhehui
+-  //ASN_SEQUENCE_ADD(&(*SRB_configList)->list,SRB1_config);
+-  SRB1_config = NULL;
++  ASN_SEQUENCE_ADD(&(*SRB_configList)->list,SRB1_config);
++  //SRB1_config = NULL;
++  //LOG_I(RRC,"Edited");
+   // PhysicalConfigDedicated
+ 
+   physicalConfigDedicated2 = CALLOC(1,sizeof(*physicalConfigDedicated2));
+-- 
+2.24.3 (Apple Git-128)
+
+
+From d02cc5437be792fe103e3a15fa21a15b985969c1 Mon Sep 17 00:00:00 2001
+From: Name <email>
+Date: Mon, 21 Oct 2019 21:15:56 +0000
+Subject: [PATCH 04/14] Recover asn message
+
+---
+ openair2/RRC/LTE/MESSAGES/asn1_msg.c | 13 +++++++++----
+ 1 file changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/openair2/RRC/LTE/MESSAGES/asn1_msg.c b/openair2/RRC/LTE/MESSAGES/asn1_msg.c
+index 1b7c7f319..99445769d 100644
+--- a/openair2/RRC/LTE/MESSAGES/asn1_msg.c
++++ b/openair2/RRC/LTE/MESSAGES/asn1_msg.c
+@@ -103,6 +103,11 @@
+   #define msg printf
+ #endif
+ 
++// #if !defined (XER_PRINT)
++// #define XER_PRINT
++// #endif
++
++
+ 
+ typedef struct xer_sprint_string_s {
+   char *string;
+@@ -3091,8 +3096,8 @@ do_RRCConnectionSetup(
+   rrcConnectionSetup->criticalExtensions.present = LTE_RRCConnectionSetup__criticalExtensions_PR_c1;
+   rrcConnectionSetup->criticalExtensions.choice.c1.present = LTE_RRCConnectionSetup__criticalExtensions__c1_PR_rrcConnectionSetup_r8 ;
+ //Zhehui
+-  //rrcConnectionSetup->criticalExtensions.choice.c1.choice.rrcConnectionSetup_r8.radioResourceConfigDedicated.srb_ToAddModList = *SRB_configList;
+-  rrcConnectionSetup->criticalExtensions.choice.c1.choice.rrcConnectionSetup_r8.radioResourceConfigDedicated.srb_ToAddModList = NULL;
++  rrcConnectionSetup->criticalExtensions.choice.c1.choice.rrcConnectionSetup_r8.radioResourceConfigDedicated.srb_ToAddModList = *SRB_configList;
++  //rrcConnectionSetup->criticalExtensions.choice.c1.choice.rrcConnectionSetup_r8.radioResourceConfigDedicated.srb_ToAddModList = NULL;
+   rrcConnectionSetup->criticalExtensions.choice.c1.choice.rrcConnectionSetup_r8.radioResourceConfigDedicated.drb_ToAddModList = NULL;
+   rrcConnectionSetup->criticalExtensions.choice.c1.choice.rrcConnectionSetup_r8.radioResourceConfigDedicated.drb_ToReleaseList = NULL;
+   rrcConnectionSetup->criticalExtensions.choice.c1.choice.rrcConnectionSetup_r8.radioResourceConfigDedicated.sps_Config = NULL;
+@@ -3555,7 +3560,7 @@ uint8_t do_RRCConnectionSetup_BR(
+   // rrcConnectionSetup->criticalExtensions.choice.c1.choice.rrcConnectionSetup_r8.radioResourceConfigDedicated.mac_MainConfig = NULL;
+ 
+ #ifdef XER_PRINT
+-  xer_fprint(stdout, &asn_DEF_DL_CCCH_Message, (void*)&dl_ccch_msg);
++  xer_fprint(stdout, &asn_DEF_LTE_DL_CCCH_Message, (void*)&dl_ccch_msg);
+ #endif
+   enc_rval = uper_encode_to_buffer(&asn_DEF_LTE_DL_CCCH_Message,
+ 				   NULL,
+@@ -3832,7 +3837,7 @@ uint16_t do_RRCConnectionReconfiguration_BR(const protocol_ctxt_t*        const
+ 	       enc_rval.failed_type->name, enc_rval.encoded);
+ 
+ #ifdef XER_PRINT
+-  xer_fprint(stdout,&asn_DEF_DL_DCCH_Message,(void*)&dl_dcch_msg);
++  xer_fprint(stdout,&asn_DEF_LTE_DL_DCCH_Message,(void*)&dl_dcch_msg);
+ #endif
+ 
+ #if defined(ENABLE_ITTI)
+-- 
+2.24.3 (Apple Git-128)
+
+
+From f7229b0896ffa22cd6c1c080f94b45fbbda64f86 Mon Sep 17 00:00:00 2001
+From: Zhehui Zhang <zhehui@cs.ucla.edu>
+Date: Mon, 21 Oct 2019 23:36:44 +0000
+Subject: [PATCH 05/14] update: add rrc message log
+
+---
+ openair2/RRC/LTE/rrc_eNB.c | 87 +++++++++++++++++++++++++++++++++-----
+ 1 file changed, 76 insertions(+), 11 deletions(-)
+
+diff --git a/openair2/RRC/LTE/rrc_eNB.c b/openair2/RRC/LTE/rrc_eNB.c
+index d93510ac5..0456be003 100644
+--- a/openair2/RRC/LTE/rrc_eNB.c
++++ b/openair2/RRC/LTE/rrc_eNB.c
+@@ -1327,6 +1327,8 @@ rrc_eNB_generate_SecurityModeCommand(
+            rrc_eNB_get_next_transaction_identifier(ctxt_pP->module_id),
+            ue_context_pP->ue_context.ciphering_algorithm,
+            ue_context_pP->ue_context.integrity_algorithm);
++  //Zhehui
++  LOG_E(RRC, "MI: RRC SecurityModeCommand for UE %x\n", ctxt_pP->rnti);
+   LOG_DUMPMSG(RRC,DEBUG_RRC,(char *)buffer,size,"[MSG] RRC Security Mode Command\n");
+   LOG_I(RRC,
+         PROTOCOL_RRC_CTXT_UE_FMT" Logical Channel DL-DCCH, Generate SecurityModeCommand (bytes %d)\n",
+@@ -1378,6 +1380,11 @@ rrc_eNB_generate_UECapabilityEnquiry(
+            ctxt_pP,
+            buffer,
+            rrc_eNB_get_next_transaction_identifier(ctxt_pP->module_id));
++  //Zhehui
++//Zhehui
++          LOG_E(RRC, "MI: RRC UECapabilityEnquiry for UE %x\n", ctxt_pP->rnti);
++
++
+   LOG_I(RRC,
+         PROTOCOL_RRC_CTXT_UE_FMT" Logical Channel DL-DCCH, Generate UECapabilityEnquiry (bytes %d)\n",
+         PROTOCOL_RRC_CTXT_UE_ARGS(ctxt_pP),
+@@ -2127,6 +2134,8 @@ rrc_eNB_process_RRCConnectionReestablishmentComplete(
+       ue_context_pP->ue_context.e_rab[i].param.nas_pdu.buffer = NULL;
+     }
+   }
++  //Zhehui
++  LOG_E(RRC,"MI: RRCConnectionReconfiguration for UE %x\n", ctxt_pP->rnti);
+ 
+   if(size==65535) {
+     LOG_E(RRC,"RRC decode err!!! do_RRCConnectionReconfiguration\n");
+@@ -2371,6 +2380,9 @@ rrc_eNB_generate_dedicatedRRCConnectionReconfiguration(const protocol_ctxt_t *co
+   //  int drb_identity_index=0;
+   uint8_t xid = rrc_eNB_get_next_transaction_identifier(ctxt_pP->module_id);   //Transaction_id,
+   DRB_configList2=&ue_context_pP->ue_context.DRB_configList2[xid];
++//Zhehui
++          LOG_E(RRC, "MI: RRCConnectionReconfiguration for UE %x\n", ctxt_pP->rnti);
++
+ 
+   if (*DRB_configList2) {
+     free(*DRB_configList2);
+@@ -3053,6 +3065,9 @@ void rrc_eNB_generate_defaultRRCConnectionReconfiguration(const protocol_ctxt_t
+     T_INT(ctxt_pP->frame),
+     T_INT(ctxt_pP->subframe), 
+     T_INT(ctxt_pP->rnti));
++//Zhehui
++          LOG_E(RRC, "MI: RRCConnectionReconfiguration for UE %x\n", ctxt_pP->rnti);
++
+ 
+   /* Configure SRB2 */
+   SRB_configList2 = &(ue_context_pP->ue_context.SRB_configList2[xid]);
+@@ -6852,6 +6867,8 @@ rrc_eNB_generate_RRCConnectionSetup(
+                             SRB_configList,
+                             &ue_context_pP->ue_context.physicalConfigDedicated);
+   }
++  //Zhehui
++  LOG_E(RRC, "MI: RRCConnectionSetup for UE%x\n", ctxt_pP->rnti);
+   LOG_DUMPMSG(RRC,DEBUG_RRC,
+               (char *)(ue_p->Srb0.Tx_buffer.Payload),
+               ue_p->Srb0.Tx_buffer.payload_size,
+@@ -6970,6 +6987,10 @@ rrc_eNB_generate_RRCConnectionSetup(
+     ue_context_pP->ue_context.rnti,
+     ue_p->Srb0.Tx_buffer.payload_size);
+ 
++//Zhehui
++//	    LOG_E(RRC, "MI: Composing RRCConnectionSetup for UE\n");
++
++
+ 
+   LOG_I(RRC,
+         PROTOCOL_RRC_CTXT_UE_FMT" [RAPROC] Logical Channel DL-CCCH, Generating RRCConnectionSetup (bytes %d)\n",
+@@ -7192,6 +7213,8 @@ rrc_eNB_decode_ccch(
+           T_INT(ctxt_pP->subframe), T_INT(ctxt_pP->rnti));
+         LOG_DUMPMSG(RRC,DEBUG_RRC,(char *)(buffer), buffer_length,
+                     "[MSG] RRC Connection Reestablishment Request\n");
++	//Zhehui
++	LOG_E(RRC, "MI: RRCConnectionReestablishment from UE %x\n", ctxt_pP->rnti);
+         LOG_D(RRC,
+               PROTOCOL_RRC_CTXT_UE_FMT"MAC_eNB--- MAC_DATA_IND (rrcConnectionReestablishmentRequest on SRB0) --> RRC_eNB\n",
+               PROTOCOL_RRC_CTXT_UE_ARGS(ctxt_pP));
+@@ -7413,8 +7436,7 @@ rrc_eNB_decode_ccch(
+       case LTE_UL_CCCH_MessageType__c1_PR_rrcConnectionRequest:
+         T(T_ENB_RRC_CONNECTION_REQUEST, T_INT(ctxt_pP->module_id), T_INT(ctxt_pP->frame),
+           T_INT(ctxt_pP->subframe), T_INT(ctxt_pP->rnti));
+-
+-      LOG_DUMPMSG(RRC,DEBUG_RRC,(char *)buffer,
++             LOG_DUMPMSG(RRC,DEBUG_RRC,(char *)buffer,
+                   buffer_length,
+                     "[MSG] RRC Connection Request\n");
+         LOG_D(RRC,
+@@ -7423,7 +7445,9 @@ rrc_eNB_decode_ccch(
+         ue_context_p = rrc_eNB_get_ue_context(
+                          RC.rrc[ctxt_pP->module_id],
+                          ctxt_pP->rnti);
+-
++//Zhehui
++	LOG_E(RRC, "MI: RRCConnectionRequest from UE %x", ue_context_p->ue_context.rnti);
++ 
+         if (ue_context_p != NULL) {
+           // erase content
+           rrc_eNB_free_mem_UE_context(ctxt_pP, ue_context_p);
+@@ -7476,7 +7500,10 @@ rrc_eNB_decode_ccch(
+               random_value = (((uint64_t)mme_code) << 32) | m_tmsi;
+ 
+               if ((ue_context_p = rrc_eNB_ue_context_stmsi_exist(ctxt_pP, mme_code, m_tmsi))) {
+-                LOG_I(RRC," S-TMSI exists, ue_context_p %p, old rnti %x => %x\n",ue_context_p,ue_context_p->ue_context.rnti,ctxt_pP->rnti);
++                //Zhehui
++		      LOG_E(RRC,"MI: RRC Connection Request from UE with old rnti %x => %x\n", ue_context_p->ue_context.rnti,ctxt_pP->rnti);
++
++		      LOG_D(RRC,"MI: S-TMSI exists, ue_context_p %p, old rnti %x => %x\n",ue_context_p,ue_context_p->ue_context.rnti,ctxt_pP->rnti);
+ 
+                 if (!NODE_IS_CU(RC.rrc[ctxt_pP->module_id]->node_type)) {
+                   rrc_mac_remove_ue(ctxt_pP->module_id, ue_context_p->ue_context.rnti);
+@@ -7507,6 +7534,8 @@ rrc_eNB_decode_ccch(
+                 ue_context_p->ue_context.ue_release_timer_rrc = 0;
+                 ue_context_p->ue_context.reestablishment_xid = -1;
+               } else {
++		//Zhehui
++                LOG_E(RRC,"MI: RRC Connection Request from a new UE\n");
+                 LOG_I(RRC," S-TMSI doesn't exist, setting Initialue_identity_s_TMSI.m_tmsi to %p => %x\n",ue_context_p,m_tmsi);
+                 //              ue_context_p = rrc_eNB_get_next_free_ue_context(ctxt_pP, NOT_A_RANDOM_UE_IDENTITY);
+                 ue_context_p = rrc_eNB_get_next_free_ue_context(ctxt_pP,random_value);
+@@ -7555,15 +7584,30 @@ rrc_eNB_decode_ccch(
+             ue_context_p->ue_context.establishment_cause = rrcConnectionRequest->establishmentCause;
+             ue_context_p->ue_context.reestablishment_cause = LTE_ReestablishmentCause_spare1;
+ 
+-            if (stmsi_received==0)
+-              LOG_I(RRC, PROTOCOL_RRC_CTXT_UE_FMT" Accept new connection from UE random UE identity (0x%" PRIx64 ") MME code %u TMSI %u cause %ld\n",
++            if (stmsi_received==0) {
++//Zhehui
++		    //LOG_E(RRC, "MI: Accept new connection from UE random UE identity (0x%" PRIx64 ") MME code %u TMSI %u cause %ld\n",
++	//			    PROTOCOL_RRC_CTXT_UE_ARGS(ctxt_pP),
++          //          ue_context_p->ue_context.random_ue_identity,
++            //        ue_context_p->ue_context.Initialue_identity_s_TMSI.mme_code,
++              //      ue_context_p->ue_context.Initialue_identity_s_TMSI.m_tmsi,
++                //    ue_context_p->ue_context.establishment_cause);
++		    LOG_I(RRC, PROTOCOL_RRC_CTXT_UE_FMT" Accept new connection from UE random UE identity (0x%" PRIx64 ") MME code %u TMSI %u cause %ld\n",
+                     PROTOCOL_RRC_CTXT_UE_ARGS(ctxt_pP),
+                     ue_context_p->ue_context.random_ue_identity,
+                     ue_context_p->ue_context.Initialue_identity_s_TMSI.mme_code,
+                     ue_context_p->ue_context.Initialue_identity_s_TMSI.m_tmsi,
+                     ue_context_p->ue_context.establishment_cause);
+-            else
+-              LOG_I(RRC, PROTOCOL_RRC_CTXT_UE_FMT" Accept new connection from UE  MME code %u TMSI %u cause %ld\n",
++	    } else {
++            //Zhehui
++	    // LOG_E(RRC, "MI: Accept new connection from UE  MME code %u TMSI %u cause %ld\n",
++            //        PROTOCOL_RRC_CTXT_UE_ARGS(ctxt_pP),
++            //        ue_context_p->ue_context.Initialue_identity_s_TMSI.mme_code,
++            //        ue_context_p->ue_context.Initialue_identity_s_TMSI.m_tmsi,
++            //        ue_context_p->ue_context.establishment_cause);
++
++
++	    LOG_I(RRC, PROTOCOL_RRC_CTXT_UE_FMT" Accept new connection from UE  MME code %u TMSI %u cause %ld\n",
+                     PROTOCOL_RRC_CTXT_UE_ARGS(ctxt_pP),
+                     ue_context_p->ue_context.Initialue_identity_s_TMSI.mme_code,
+                     ue_context_p->ue_context.Initialue_identity_s_TMSI.m_tmsi,
+@@ -7571,7 +7615,8 @@ rrc_eNB_decode_ccch(
+ 
+             if (stmsi_received == 0)
+               RC.rrc[ctxt_pP->module_id]->Nb_ue++;
+-          } else {
++	    }
++	    } else {
+             // no context available
+             if (flexran_agent_get_rrc_xface(ctxt_pP->module_id)) {
+               flexran_agent_get_rrc_xface(ctxt_pP->module_id)->flexran_agent_notify_ue_state_change(ctxt_pP->module_id,
+@@ -7622,7 +7667,10 @@ rrc_eNB_decode_ccch(
+                &DCCH_LCHAN_DESC,
+                LCHAN_DESC_SIZE);
+         rrc_eNB_generate_RRCConnectionSetup(ctxt_pP, ue_context_p, CC_id);
+-        LOG_I(RRC, PROTOCOL_RRC_CTXT_UE_FMT"CALLING RLC CONFIG SRB1 (rbid %d)\n",
++         //Zhehui
++	    //LOG_E(RRC, "MI: Initializating Signal Radio Bearer 1 for UE %x\n", ctxt_pP->rnti);
++
++ LOG_I(RRC, PROTOCOL_RRC_CTXT_UE_FMT"CALLING RLC CONFIG SRB1 (rbid %d)\n",
+               PROTOCOL_RRC_CTXT_UE_ARGS(ctxt_pP),
+               Idx);
+         MSC_LOG_TX_MESSAGE(
+@@ -7774,6 +7822,8 @@ rrc_eNB_decode_dcch(
+           LOG_I(RRC, "Processing LTE_RRCConnectionReconfigurationComplete UE %x, ue_context_p is NULL\n", ctxt_pP->rnti);
+           break;
+         }
++//Zhehui
++          LOG_E(RRC, "MI: RRCConnectionReconfigurationComplete from UE %x\n", ctxt_pP->rnti);
+ 
+         LOG_DUMPMSG(RRC,DEBUG_RRC,(char *)(Rx_sdu),sdu_sizeP,
+                     "[MSG] RRC Connection Reconfiguration Complete\n");
+@@ -7964,7 +8014,10 @@ rrc_eNB_decode_dcch(
+           T_INT(ctxt_pP->subframe), T_INT(ctxt_pP->rnti));
+         LOG_DUMPMSG(RRC,DEBUG_RRC,(char *)Rx_sdu,sdu_sizeP,
+                     "[MSG] RRC Connection Reestablishment Complete\n");
+-        MSC_LOG_RX_MESSAGE(
++      //Zhehui
++          LOG_E(RRC, "MI: RRCConnectionReconfigurationComplete from UE %x\n", ctxt_pP->rnti);
++
++  MSC_LOG_RX_MESSAGE(
+           MSC_RRC_ENB,
+           MSC_RRC_UE,
+           Rx_sdu,
+@@ -8047,6 +8100,9 @@ rrc_eNB_decode_dcch(
+           break;
+         }
+ 
++	//Zhehui
++	LOG_E(RRC, "MI: RRCConnectionSetupComplete from UE %x\n", ctxt_pP->rnti);
++
+         LOG_DUMPMSG(RRC,DEBUG_RRC,(char *)Rx_sdu,sdu_sizeP,
+                     "[MSG] RRC Connection SetupComplete\n");
+         MSC_LOG_RX_MESSAGE(
+@@ -8100,6 +8156,9 @@ rrc_eNB_decode_dcch(
+           LOG_I(RRC, "Processing securityModeComplete UE %x, ue_context_p is NULL\n", ctxt_pP->rnti);
+           break;
+         }
++//Zhehui
++          LOG_E(RRC, "RRC SecurityModeComplete from UE %x\n", ctxt_pP->rnti);
++
+ 
+         LOG_DUMPMSG(RRC,DEBUG_RRC,(char *)Rx_sdu,sdu_sizeP,
+                     "[MSG] RRC Security Mode Complete\n");
+@@ -8175,6 +8234,9 @@ rrc_eNB_decode_dcch(
+           LOG_I(RRC, "Processing ueCapabilityInformation UE %x, ue_context_p is NULL\n", ctxt_pP->rnti);
+           break;
+         }
++//Zhehui
++          LOG_E(RRC, "RRC UECapabilityInformation from UE %x\n", ctxt_pP->rnti);
++
+ 
+         LOG_DUMPMSG(RRC,DEBUG_RRC,(char *)Rx_sdu,sdu_sizeP,
+                     "[MSG] RRC UECapablility Information\n");
+@@ -8272,6 +8334,9 @@ rrc_eNB_decode_dcch(
+           LOG_I(RRC, "Processing ulInformationTransfer UE %x, ue_context_p is NULL\n", ctxt_pP->rnti);
+           break;
+         }
++//Zhehui
++          LOG_E(RRC, "MI: ULInformationTransfer from UE %x\n", ctxt_pP->rnti);
++
+ 
+         LOG_D(RRC,"[MSG] RRC UL Information Transfer \n");
+         LOG_DUMPMSG(RRC,DEBUG_RRC,(char *)Rx_sdu,sdu_sizeP,
+-- 
+2.24.3 (Apple Git-128)
+
+
+From 54951a859e467c311604665691e88aff466abb80 Mon Sep 17 00:00:00 2001
+From: Zhehui Zhang <zhehui@cs.ucla.edu>
+Date: Tue, 22 Oct 2019 02:57:21 +0000
+Subject: [PATCH 06/14] fix: rrc logging
+
+---
+ openair2/RRC/LTE/rrc_eNB.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/openair2/RRC/LTE/rrc_eNB.c b/openair2/RRC/LTE/rrc_eNB.c
+index 0456be003..333f84bbe 100644
+--- a/openair2/RRC/LTE/rrc_eNB.c
++++ b/openair2/RRC/LTE/rrc_eNB.c
+@@ -7446,7 +7446,7 @@ rrc_eNB_decode_ccch(
+                          RC.rrc[ctxt_pP->module_id],
+                          ctxt_pP->rnti);
+ //Zhehui
+-	LOG_E(RRC, "MI: RRCConnectionRequest from UE %x", ue_context_p->ue_context.rnti);
++	//LOG_E(RRC, "MI: RRCConnectionRequest from UE %x", ue_context_p->ue_context.rnti);
+  
+         if (ue_context_p != NULL) {
+           // erase content
+-- 
+2.24.3 (Apple Git-128)
+
+
+From ff5506cfafeff1c841857fc47474ca0f2539f75d Mon Sep 17 00:00:00 2001
+From: Zhaowei <tan@cs.ucla.edu>
+Date: Sat, 2 Nov 2019 01:03:05 +0000
+Subject: [PATCH 07/14] use new API for generating log; test on PDCP message
+
+---
+ cmake_targets/CMakeLists.txt         |  2 +-
+ common/utils/LOG/log.h               |  1 +
+ openair2/LAYER2/PDCP_v10.1.0/pdcp.c  |  9 ++++++++-
+ openair2/RRC/LTE/MESSAGES/asn1_msg.c | 27 ++++++++++++++++-----------
+ 4 files changed, 26 insertions(+), 13 deletions(-)
+
+diff --git a/cmake_targets/CMakeLists.txt b/cmake_targets/CMakeLists.txt
+index c510a92df..a2925a4fb 100644
+--- a/cmake_targets/CMakeLists.txt
++++ b/cmake_targets/CMakeLists.txt
+@@ -233,7 +233,7 @@ add_boolean_option(ASN_DEBUG           False "ASN1 coder/decoder Debug")
+ add_boolean_option(ASN_EMIT_DEBUG      False "ASN1 coder/decoder Debug")
+ add_boolean_option(MSG_PRINT           False "print debug messages")
+ add_boolean_option(DISABLE_XER_PRINT   False "print XER Format")
+-add_boolean_option(XER_PRINT           False "print XER Format")
++add_boolean_option(XER_PRINT           True "print XER Format")
+ add_boolean_option(RRC_MSG_PRINT       False "print RRC messages")
+ add_boolean_option(PDCP_MSG_PRINT      False "print PDCP messages to /tmp/pdcp.log")
+ add_boolean_option(DEBUG_PDCP_PAYLOAD  False "print PDCP PDU to stdout")  # if true, make sure that global and PDCP log levels are trace
+diff --git a/common/utils/LOG/log.h b/common/utils/LOG/log.h
+index be7db5470..28374a15a 100644
+--- a/common/utils/LOG/log.h
++++ b/common/utils/LOG/log.h
+@@ -385,6 +385,7 @@ int32_t write_file_matlab(const char *fname, const char *vname, void *data, int
+ #    define LOG_I(c, x...) do { if (T_stdout) { if( g_log->log_component[c].level >= OAILOG_INFO   ) logRecord_mt(__FILE__, __FUNCTION__, __LINE__,c, OAILOG_INFO, x)    ;} else { T(T_LEGACY_ ## c ## _INFO, T_PRINTF(x))    ;}} while (0)
+ #    define LOG_D(c, x...) do { if (T_stdout) { if( g_log->log_component[c].level >= OAILOG_DEBUG  ) logRecord_mt(__FILE__, __FUNCTION__, __LINE__,c, OAILOG_DEBUG, x)   ;} else { T(T_LEGACY_ ## c ## _DEBUG, T_PRINTF(x))   ;}} while (0)
+ #    define LOG_T(c, x...) do { if (T_stdout) { if( g_log->log_component[c].level >= OAILOG_TRACE  ) logRecord_mt(__FILE__, __FUNCTION__, __LINE__,c, OAILOG_TRACE, x)   ;} else { T(T_LEGACY_ ## c ## _TRACE, T_PRINTF(x))   ;}} while (0)
++#    define LOG_MI(c, ...) do { printf("[MI] %s ",c); printf(__VA_ARGS__); } while (0);
+ #    define VLOG(c,l, f, args) do { if (T_stdout) { if( g_log->log_component[c].level >= l  ) vlogRecord_mt(__FILE__, __FUNCTION__, __LINE__,c, l, f, args)   ;} } while (0)
+ /* macro used to dump a buffer or a message as in openair2/RRC/LTE/RRC_eNB.c, replaces LOG_F macro */
+ #    define LOG_DUMPMSG(c, f, b, s, x...) do {  if(g_log->dump_mask & f) log_dump(c, b, s, LOG_DUMP_CHAR, x)  ;}   while (0)  /* */
+diff --git a/openair2/LAYER2/PDCP_v10.1.0/pdcp.c b/openair2/LAYER2/PDCP_v10.1.0/pdcp.c
+index 1677d769a..c691c695e 100644
+--- a/openair2/LAYER2/PDCP_v10.1.0/pdcp.c
++++ b/openair2/LAYER2/PDCP_v10.1.0/pdcp.c
+@@ -350,6 +350,8 @@ boolean_t pdcp_data_req(
+      * Ask sublayer to transmit data and check return value
+      * to see if RLC succeeded
+      */
++
++    LOG_MI("0xB0A3", "Frame %d Subframe %d Sequence %d\n", ctxt_pP->frame, ctxt_pP->subframe, current_sn);
+     LOG_DUMPMSG(PDCP,DEBUG_PDCP,(char *)pdcp_pdu_p->data,pdcp_pdu_size,
+                 "[MSG] PDCP DL %s PDU on rb_id %d\n",(srb_flagP)? "CONTROL" : "DATA", rb_idP);
+ 
+@@ -452,6 +454,8 @@ boolean_t pdcp_data_req(
+         } // switch case
+       }
+     }
++ 
++    LOG_MI("0xB0A3", "After Sending: Frame %d Subframe %d Sequence %d\n", ctxt_pP->frame, ctxt_pP->subframe, current_sn);
+   }
+ 
+   if (ctxt_pP->enb_flag == ENB_FLAG_YES) {
+@@ -929,7 +933,7 @@ pdcp_data_ind(
+    * from its second byte (skipping 0th and 1st octets, i.e.
+    * PDCP header)
+    */
+-  LOG_E(PDCP, "frame: %d, subframe: %d, sequence number: %d, size: %d\n",
++  LOG_MI("0xB0B3", "MI: frame: %d, subframe: %d, sequence number: %d, size: %d\n",
+     ctxt_pP->frame, ctxt_pP->subframe, sequence_number, sdu_buffer_sizeP - payload_offset);
+ 
+   if (LINK_ENB_PDCP_TO_GTPV1U) {
+@@ -1075,6 +1079,9 @@ pdcp_data_ind(
+     stop_meas(&UE_pdcp_stats[ctxt_pP->module_id].data_ind);
+   }
+ 
++LOG_MI("0xB0B3", "MI: After sending to GPT frame: %d, subframe: %d, sequence number: %d\n",
++    ctxt_pP->frame, ctxt_pP->subframe, sequence_number);
++
+   VCD_SIGNAL_DUMPER_DUMP_FUNCTION_BY_NAME(VCD_SIGNAL_DUMPER_FUNCTIONS_PDCP_DATA_IND,VCD_FUNCTION_OUT);
+   return TRUE;
+ }
+diff --git a/openair2/RRC/LTE/MESSAGES/asn1_msg.c b/openair2/RRC/LTE/MESSAGES/asn1_msg.c
+index 99445769d..c85af414e 100644
+--- a/openair2/RRC/LTE/MESSAGES/asn1_msg.c
++++ b/openair2/RRC/LTE/MESSAGES/asn1_msg.c
+@@ -104,9 +104,9 @@
+ #endif
+ 
+ // #if !defined (XER_PRINT)
+-// #define XER_PRINT
++# define XER_PRINT
+ // #endif
+-
++# define DEBUG_ASN1 1
+ 
+ 
+ typedef struct xer_sprint_string_s {
+@@ -3136,6 +3136,9 @@ do_RRCConnectionSetup(
+   if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
+     xer_fprint(stdout, &asn_DEF_LTE_DL_CCCH_Message, (void *)&dl_ccch_msg);
+   }
++  //Zhehui
++  LOG_E(RRC, "Sending setup message");
++  xer_fprint(stdout, &asn_DEF_LTE_DL_CCCH_Message, (void *)&dl_ccch_msg);
+ 
+   enc_rval = uper_encode_to_buffer(&asn_DEF_LTE_DL_CCCH_Message,
+                                    NULL,
+@@ -3560,8 +3563,10 @@ uint8_t do_RRCConnectionSetup_BR(
+   // rrcConnectionSetup->criticalExtensions.choice.c1.choice.rrcConnectionSetup_r8.radioResourceConfigDedicated.mac_MainConfig = NULL;
+ 
+ #ifdef XER_PRINT
++  LOG_E(RRC,"ZHEHUI printing");
+   xer_fprint(stdout, &asn_DEF_LTE_DL_CCCH_Message, (void*)&dl_ccch_msg);
+ #endif
++  LOG_E(RRC, "Sending message");
+   enc_rval = uper_encode_to_buffer(&asn_DEF_LTE_DL_CCCH_Message,
+ 				   NULL,
+ 				   (void*)&dl_ccch_msg,
+@@ -3583,6 +3588,7 @@ uint8_t do_RRCConnectionSetup_BR(
+       msg_p->ittiMsg.rrc_dl_ccch.size = message_string_size;
+       memcpy(&msg_p->ittiMsg.rrc_dl_ccch.text, message_string, message_string_size);
+ 
++
+       itti_send_msg_to_task(TASK_UNKNOWN, ctxt_pP->instance, msg_p);
+     }
+   }
+@@ -3632,9 +3638,9 @@ uint8_t do_SecurityModeCommand(
+   dl_dcch_msg.message.choice.c1.choice.securityModeCommand.criticalExtensions.choice.c1.choice.securityModeCommand_r8.securityConfigSMC.securityAlgorithmConfig.integrityProtAlgorithm
+     = (e_LTE_SecurityAlgorithmConfig__integrityProtAlgorithm)integrityProtAlgorithm;
+ 
+-  if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
++//  if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
+     xer_fprint(stdout, &asn_DEF_LTE_DL_DCCH_Message, (void *)&dl_dcch_msg);
+-  }
++//  }
+ 
+   enc_rval = uper_encode_to_buffer(&asn_DEF_LTE_DL_DCCH_Message,
+                                    NULL,
+@@ -3686,9 +3692,9 @@ uint8_t do_UECapabilityEnquiry( const protocol_ctxt_t *const ctxt_pP,
+   ASN_SEQUENCE_ADD(&dl_dcch_msg.message.choice.c1.choice.ueCapabilityEnquiry.criticalExtensions.choice.c1.choice.ueCapabilityEnquiry_r8.ue_CapabilityRequest.list,
+ 		   &rat);
+ 
+-  if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
++//  if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
+     xer_fprint(stdout, &asn_DEF_LTE_DL_DCCH_Message, (void *)&dl_dcch_msg);
+-  }
++//  }
+ 
+   enc_rval = uper_encode_to_buffer(&asn_DEF_LTE_DL_DCCH_Message,
+                                    NULL,
+@@ -4047,9 +4053,9 @@ uint16_t do_RRCConnectionReconfiguration(const protocol_ctxt_t *const ctxt_pP,
+     return -1;
+   }
+ 
+-  if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
++//  if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
+     xer_fprint(stdout,&asn_DEF_LTE_DL_DCCH_Message,(void *)&dl_dcch_msg);
+-  }
++//  }
+ 
+   LOG_I(RRC,"RRCConnectionReconfiguration Encoded %zd bits (%zd bytes)\n",enc_rval.encoded,(enc_rval.encoded+7)/8);
+   // for (i=0;i<30;i++)
+@@ -4210,9 +4216,9 @@ do_RRCConnectionReestablishment(
+   ue_context_pP->ue_context.kenb_ncc = 0;
+   rrcConnectionReestablishment->criticalExtensions.choice.c1.choice.rrcConnectionReestablishment_r8.nonCriticalExtension = NULL;
+ 
+-  if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
++//  if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
+     xer_fprint(stdout, &asn_DEF_LTE_DL_CCCH_Message, (void *)&dl_ccch_msg);
+-  }
++//  }
+ 
+   enc_rval = uper_encode_to_buffer(&asn_DEF_LTE_DL_CCCH_Message,
+                                    NULL,
+@@ -4888,4 +4894,3 @@ OAI_UECapability_t *fill_ue_capability(char *UE_EUTRA_Capability_xer_fname) {
+   }
+   return(&UECapability);
+ }
+-
+-- 
+2.24.3 (Apple Git-128)
+
+
+From 79b6806fcaa7736c80e57dd0bd7290cf51cf7651 Mon Sep 17 00:00:00 2001
+From: Zhaowei <tan@cs.ucla.edu>
+Date: Thu, 14 Nov 2019 04:02:33 +0000
+Subject: [PATCH 08/14] MI logging patch 2
+
+---
+ cmake_targets/CMakeLists.txt                  |  4 +--
+ openair2/LAYER2/MAC/eNB_scheduler_dlsch.c     | 16 ++++-----
+ .../LAYER2/MAC/eNB_scheduler_primitives.c     | 11 +++++++
+ openair2/LAYER2/MAC/eNB_scheduler_ulsch.c     | 33 ++++++++++++++++++-
+ openair2/LAYER2/PDCP_v10.1.0/pdcp.c           |  8 ++---
+ openair2/LAYER2/RLC/AM_v9.3.0/rlc_am.c        | 14 ++++++++
+ openair2/RRC/LTE/rrc_eNB.c                    | 14 ++++----
+ 7 files changed, 78 insertions(+), 22 deletions(-)
+
+diff --git a/cmake_targets/CMakeLists.txt b/cmake_targets/CMakeLists.txt
+index a2925a4fb..03033ded2 100644
+--- a/cmake_targets/CMakeLists.txt
++++ b/cmake_targets/CMakeLists.txt
+@@ -616,7 +616,7 @@ Message("CPU_Affinity flag is ${CPU_AFFINITY}")
+ ##############################################################
+ add_boolean_option(ENABLE_USE_MME          True  "eNB connected to MME (INTERFACE S1-C), not standalone eNB")
+ add_boolean_option(NO_RRM                  True  "DO WE HAVE A RADIO RESSOURCE MANAGER: NO")
+-add_boolean_option(RRC_DEFAULT_RAB_IS_AM False "set the RLC mode to AM for the default bearer")
++add_boolean_option(RRC_DEFAULT_RAB_IS_AM   True "set the RLC mode to AM for the default bearer")
+ 
+ add_boolean_option(OAI_NW_DRIVER_TYPE_ETHERNET False "????")
+ add_boolean_option(DEADLINE_SCHEDULER True "Use the Linux scheduler SCHED_DEADLINE: kernel >= 3.14")
+@@ -719,7 +719,7 @@ add_boolean_option(TRACE_RLC_UM_TX_STATUS  False "TRACE for RLC UM, TO BE CHANGE
+ ##########################
+ # RRC LAYER OPTIONS
+ ##########################
+-add_boolean_option(RRC_DEFAULT_RAB_IS_AM       False  "Otherwise it is UM, configure params are actually set in rrc_eNB.c:rrc_eNB_generate_defaultRRCConnectionReconfiguration(...)")
++add_boolean_option(RRC_DEFAULT_RAB_IS_AM       True  "Otherwise it is UM, configure params are actually set in rrc_eNB.c:rrc_eNB_generate_defaultRRCConnectionReconfiguration(...)")
+ 
+ 
+ ##########################
+diff --git a/openair2/LAYER2/MAC/eNB_scheduler_dlsch.c b/openair2/LAYER2/MAC/eNB_scheduler_dlsch.c
+index c7c87dd70..be5a82990 100644
+--- a/openair2/LAYER2/MAC/eNB_scheduler_dlsch.c
++++ b/openair2/LAYER2/MAC/eNB_scheduler_dlsch.c
+@@ -2667,13 +2667,13 @@ fill_DLSCH_dci(module_id_t module_idP,
+                 rballoc_sub);
+             dl_config_pdu->dci_dl_pdu.dci_dl_pdu_rel8.resource_allocation_type = 0;
+ 
+-LOG_E(MAC, "DCI Frame %d, SubFrame%d, CC_id %d, UE_id: %d, number of rb %d, coding: %d\n",
+-            frameP,
+-            subframeP,
+-            CC_id,
+-            UE_id,
+-            nb_rb,
+-            dl_config_pdu->dci_dl_pdu.dci_dl_pdu_rel8.resource_block_coding
++            LOG_MI("0xB173", "DCI Frame %d, SubFrame %d, CC_id %d, UE_id: %d, number of rb %d, coding: %d\n",
++              frameP,
++              subframeP,
++              CC_id,
++              UE_id,
++              nb_rb,
++              dl_config_pdu->dci_dl_pdu.dci_dl_pdu_rel8.resource_block_coding
+             );
+ 
+ 
+@@ -2685,7 +2685,7 @@ LOG_E(MAC, "DCI Frame %d, SubFrame%d, CC_id %d, UE_id: %d, number of rb %d, codi
+                 N_RBG,
+                 rballoc_sub);
+ 
+-LOG_E(MAC, "DLSCH Frame %d, SubFrame%d, CC_id %d, UE_id: %d, number of rb %d, coding: %d\n",
++          LOG_D(MAC, "DLSCH Frame %d, SubFrame%d, CC_id %d, UE_id: %d, number of rb %d, coding: %d\n",
+             frameP,
+             subframeP,
+             CC_id,
+diff --git a/openair2/LAYER2/MAC/eNB_scheduler_primitives.c b/openair2/LAYER2/MAC/eNB_scheduler_primitives.c
+index 63f838f65..1c3961055 100644
+--- a/openair2/LAYER2/MAC/eNB_scheduler_primitives.c
++++ b/openair2/LAYER2/MAC/eNB_scheduler_primitives.c
+@@ -5089,6 +5089,17 @@ SR_indication(module_id_t mod_idP,
+           UE_id,
+           cc_idP);
+   }
++
++  /*LOG_E(MAC, "[MI] PUCCH-SR Frame %d subframe %d UE_id %d on CC_id%d\n",
++		  frameP,
++		  subframeP,
++		  UE_id,
++		  cc_idP);*/ // PHY-qianru: SR
++  LOG_MI("0xB13C", "Frame_num %d subframe_num %d UE_id %d on CC_id %d\n",
++		  frameP,
++		  subframeP,
++		  UE_id,
++		  cc_idP);
+   
+   return;
+ }
+diff --git a/openair2/LAYER2/MAC/eNB_scheduler_ulsch.c b/openair2/LAYER2/MAC/eNB_scheduler_ulsch.c
+index be1f838aa..05dd1fec0 100644
+--- a/openair2/LAYER2/MAC/eNB_scheduler_ulsch.c
++++ b/openair2/LAYER2/MAC/eNB_scheduler_ulsch.c
+@@ -149,6 +149,22 @@ rx_sdu(const module_id_t enb_mod_idP,
+     UE_scheduling_control = &(UE_list->UE_sched_ctrl[UE_id]);
+     UE_template_ptr = &(UE_list->UE_template[CC_idP][UE_id]);
+ 
++    LOG_MI("0xB064", "[eNB %d][PUSCH %d] CC_id %d %d.%d Received ULSCH sdu round %d from PHY (rnti %x, UE_id %d) ul_cqi %d\n",
++          enb_mod_idP,
++          harq_pid,
++          CC_idP,
++          frameP,
++          subframeP,
++          UE_scheduling_control->round_UL[CC_idP][harq_pid],
++          current_rnti,
++          UE_id,
++          ul_cqi);
++
++    LOG_MI("0xB064", "CQI Frame_num %d Subframe_num %d ul_cqi %d\n",
++		    frameP,
++		    subframeP,
++		    ul_cqi);
++
+     LOG_D(MAC, "[eNB %d][PUSCH %d] CC_id %d %d.%d Received ULSCH sdu round %d from PHY (rnti %x, UE_id %d) ul_cqi %d\n",
+           enb_mod_idP,
+           harq_pid,
+@@ -557,7 +573,14 @@ rx_sdu(const module_id_t enb_mod_idP,
+                   rx_ces[i],
+                   UE_template_ptr->estimated_ul_buffer,
+                   UE_template_ptr->ul_buffer_info[lcgid]);
+-          }
++            LOG_MI("0xB064", "BSR Frame_num %d Subframe_num %d LCG0 %u LCG1 %u LCG2 %u LCG3 %u\n",
++			    frameP,
++			    subframeP,
++			    UE_template_ptr->ul_buffer_info[LCGID0],
++			    UE_template_ptr->ul_buffer_info[LCGID1],
++			    UE_template_ptr->ul_buffer_info[LCGID2],
++			    UE_template_ptr->ul_buffer_info[LCGID3]);
++	  }
+         } else {
+           /* Need error message */
+         }
+@@ -596,6 +619,14 @@ rx_sdu(const module_id_t enb_mod_idP,
+             UE_template_ptr->ul_buffer_info[LCGID2],
+             UE_template_ptr->ul_buffer_info[LCGID3]);
+ 
++	  LOG_MI("0xB064", "BSR Frame_num %d Subframe_num %d LCG0 %u LCG1 %u LCG2 %u LCG3 %u\n",
++                            frameP,
++                            subframeP,
++                            UE_template_ptr->ul_buffer_info[LCGID0],
++                            UE_template_ptr->ul_buffer_info[LCGID1],
++                            UE_template_ptr->ul_buffer_info[LCGID2],
++                            UE_template_ptr->ul_buffer_info[LCGID3]);
++
+           if (crnti_rx == 1) {
+             LOG_D(MAC, "[eNB %d] CC_id %d MAC CE_LCID %d: Received CRNTI.\n",
+                   enb_mod_idP,
+diff --git a/openair2/LAYER2/PDCP_v10.1.0/pdcp.c b/openair2/LAYER2/PDCP_v10.1.0/pdcp.c
+index c691c695e..2761d7566 100644
+--- a/openair2/LAYER2/PDCP_v10.1.0/pdcp.c
++++ b/openair2/LAYER2/PDCP_v10.1.0/pdcp.c
+@@ -933,8 +933,8 @@ pdcp_data_ind(
+    * from its second byte (skipping 0th and 1st octets, i.e.
+    * PDCP header)
+    */
+-  LOG_MI("0xB0B3", "MI: frame: %d, subframe: %d, sequence number: %d, size: %d\n",
+-    ctxt_pP->frame, ctxt_pP->subframe, sequence_number, sdu_buffer_sizeP - payload_offset);
++  LOG_MI("0xB0B3", "MI: frame: %d, subframe: %d, sequence number: %d, size: %d Mode %d\n",
++    ctxt_pP->frame, ctxt_pP->subframe, sequence_number, sdu_buffer_sizeP - payload_offset, pdcp_p->rlc_mode);
+ 
+   if (LINK_ENB_PDCP_TO_GTPV1U) {
+     if ((TRUE == ctxt_pP->enb_flag) && (FALSE == srb_flagP)) {
+@@ -1079,8 +1079,8 @@ pdcp_data_ind(
+     stop_meas(&UE_pdcp_stats[ctxt_pP->module_id].data_ind);
+   }
+ 
+-LOG_MI("0xB0B3", "MI: After sending to GPT frame: %d, subframe: %d, sequence number: %d\n",
+-    ctxt_pP->frame, ctxt_pP->subframe, sequence_number);
++LOG_MI("0xB0B3", "MI: After sending to GPT frame: %d, subframe: %d, sequence number: %d, Mode %d\n",
++    ctxt_pP->frame, ctxt_pP->subframe, sequence_number, pdcp_p->rlc_mode);
+ 
+   VCD_SIGNAL_DUMPER_DUMP_FUNCTION_BY_NAME(VCD_SIGNAL_DUMPER_FUNCTIONS_PDCP_DATA_IND,VCD_FUNCTION_OUT);
+   return TRUE;
+diff --git a/openair2/LAYER2/RLC/AM_v9.3.0/rlc_am.c b/openair2/LAYER2/RLC/AM_v9.3.0/rlc_am.c
+index 5f6e15d28..2e997e58b 100644
+--- a/openair2/LAYER2/RLC/AM_v9.3.0/rlc_am.c
++++ b/openair2/LAYER2/RLC/AM_v9.3.0/rlc_am.c
+@@ -1013,6 +1013,20 @@ rlc_am_mac_data_indication (
+     }
+   } /* LOG_DEBUGFLAG(RLC) || MESSAGE_TRACE_GENERATOR) */
+ 
++  if (data_indP.data.nb_elements > 0) {
++      tb_p = data_indP.data.head;
++
++      while (tb_p != NULL) {
++        rlc_am_pdu_sn_10_p = (rlc_am_pdu_sn_10_t *)((struct mac_tb_ind *) (tb_p->data))->data_ptr;
++        tb_size_in_bytes   = ((struct mac_tb_ind *) (tb_p->data))->size;
++        if ((((struct mac_tb_ind *) (tb_p->data))->data_ptr[0] & RLC_DC_MASK) == RLC_DC_DATA_PDU ) {
++          if (rlc_am_get_data_pdu_infos(ctxt_pP,l_rlc_p,rlc_am_pdu_sn_10_p, tb_size_in_bytes, &pdu_info) >= 0) {
++            LOG_MI("0xB092", "%d %d %d %d %d %d\n", ctxt_pP->frame, ctxt_pP->subframe, l_rlc_p->rb_id, tb_size_in_bytes, pdu_info.header_size, pdu_info.payload_size);
++          }
++        }
++        tb_p = tb_p->next;
++      }
++  }
+   rlc_am_rx (ctxt_pP, rlc_pP, data_indP);
+ }
+ 
+diff --git a/openair2/RRC/LTE/rrc_eNB.c b/openair2/RRC/LTE/rrc_eNB.c
+index 333f84bbe..154260ab7 100644
+--- a/openair2/RRC/LTE/rrc_eNB.c
++++ b/openair2/RRC/LTE/rrc_eNB.c
+@@ -5468,13 +5468,13 @@ rrc_eNB_generate_HO_RRCConnectionReconfiguration(const protocol_ctxt_t *const ct
+   DRB_rlc_config = CALLOC(1, sizeof(*DRB_rlc_config));
+   DRB_config->rlc_Config = DRB_rlc_config;
+ #ifdef RRC_DEFAULT_RAB_IS_AM
+-  DRB_rlc_config->present = RLC_Config_PR_am;
+-  DRB_rlc_config->choice.am.ul_AM_RLC.t_PollRetransmit = T_PollRetransmit_ms50;
+-  DRB_rlc_config->choice.am.ul_AM_RLC.pollPDU = PollPDU_p16;
+-  DRB_rlc_config->choice.am.ul_AM_RLC.pollByte = PollByte_kBinfinity;
+-  DRB_rlc_config->choice.am.ul_AM_RLC.maxRetxThreshold = UL_AM_RLC__maxRetxThreshold_t8;
+-  DRB_rlc_config->choice.am.dl_AM_RLC.t_Reordering = T_Reordering_ms35;
+-  DRB_rlc_config->choice.am.dl_AM_RLC.t_StatusProhibit = T_StatusProhibit_ms25;
++  DRB_rlc_config->present = LTE_RLC_Config_PR_am;
++  DRB_rlc_config->choice.am.ul_AM_RLC.t_PollRetransmit = LTE_T_PollRetransmit_ms50;
++  DRB_rlc_config->choice.am.ul_AM_RLC.pollPDU = LTE_PollPDU_p16;
++  DRB_rlc_config->choice.am.ul_AM_RLC.pollByte = LTE_PollByte_kBinfinity;
++  DRB_rlc_config->choice.am.ul_AM_RLC.maxRetxThreshold = LTE_UL_AM_RLC__maxRetxThreshold_t8;
++  DRB_rlc_config->choice.am.dl_AM_RLC.t_Reordering = LTE_T_Reordering_ms35;
++  DRB_rlc_config->choice.am.dl_AM_RLC.t_StatusProhibit = LTE_T_StatusProhibit_ms25;
+ #else
+   DRB_rlc_config->present = LTE_RLC_Config_PR_um_Bi_Directional;
+   DRB_rlc_config->choice.um_Bi_Directional.ul_UM_RLC.sn_FieldLength = LTE_SN_FieldLength_size10;
+-- 
+2.24.3 (Apple Git-128)
+
+
+From c02a7607f6d44ced9d00f07fa0b9d79a43acbb50 Mon Sep 17 00:00:00 2001
+From: Zhaowei <tan@cs.ucla.edu>
+Date: Wed, 27 Nov 2019 01:58:18 +0000
+Subject: [PATCH 09/14] allow mi log level
+
+---
+ common/utils/LOG/log.c | 39 ++++++++++++++++++++++++++++++++++++++-
+ common/utils/LOG/log.h | 20 ++++++++++++++++++--
+ 2 files changed, 56 insertions(+), 3 deletions(-)
+
+diff --git a/common/utils/LOG/log.c b/common/utils/LOG/log.c
+index 857a83dea..0c5176aae 100644
+--- a/common/utils/LOG/log.c
++++ b/common/utils/LOG/log.c
+@@ -60,6 +60,26 @@ char * log_mem_filename = &__log_mem_filename[0];
+ char logmem_filename[1024] = {0};
+ 
+ 
++mapping mi_map[] = {
++  {"0xB0A3", LTE_PDCP_DL_Cipher_Data_PDU},
++  {"0xB0B3", LTE_PDCP_UL_Cipher_Data_PDU},
++  {"0xB063", LTE_MAC_DL_Transport_Block},
++  {"0xB064", LTE_MAC_UL_Transport_Block},
++  {"0xB092", LTE_RLC_UL_AM_All_PDU},
++  {"0xB082", LTE_RLC_DL_AM_All_PDU},
++  {NULL, -1}
++};
++
++mapping mi_name_map[] = {
++  {"LTE_PDCP_DL_Cipher_Data_PDU", LTE_PDCP_DL_Cipher_Data_PDU},
++  {"LTE_PDCP_UL_Cipher_Data_PDU", LTE_PDCP_UL_Cipher_Data_PDU},
++  {"LTE_RLC_DL_AM_All_PDU", LTE_RLC_DL_AM_All_PDU},
++  {"LTE_RLC_UL_AM_All_PDU", LTE_RLC_UL_AM_All_PDU},
++  {"LTE_MAC_DL_Transport_Block", LTE_MAC_DL_Transport_Block},
++  {"LTE_MAC_UL_Transport_Block", LTE_MAC_UL_Transport_Block},
++  {NULL, -1}
++};
++
+ mapping log_level_names[] = {
+   {"error",  OAILOG_ERR},
+   {"warn",   OAILOG_WARNING},
+@@ -222,6 +242,23 @@ int write_file_matlab(const char *fname,const char *vname,void *data,int length,
+   return 0;
+ }
+ 
++void log_getconfig_mi(void) {
++  paramdef_t logmi_level[MAX_LOG_MI_COMPONENTS];
++  memset(logmi_level, 0, sizeof(paramdef_t)*MAX_LOG_MI_COMPONENTS);
++
++  for (int i = MIN_LOG_MI_COMPONENTS; i < MAX_LOG_MI_COMPONENTS; i++) {
++    sprintf((char *)logmi_level[i].optname,"%s", map_int_to_str(mi_name_map, i));
++    logmi_level[i].defintval = 0;
++    logmi_level[i].numelt = 0;
++    logmi_level[i].type = TYPE_UINT;
++  }
++  config_get( logmi_level, MAX_LOG_MI_COMPONENTS, "mi_log_level");
++  for (int i = MIN_LOG_MI_COMPONENTS; i < MAX_LOG_MI_COMPONENTS; i++) {
++    printf("%s: %d\n", logmi_level[i].optname, *(logmi_level[i].uptr));
++    log_mi_level[i] = *(logmi_level[i].uptr);
++  }
++}
++
+ /* get log parameters from configuration file */
+ void  log_getconfig(log_t *g_log) {
+   char *gloglevel = NULL;
+@@ -265,7 +302,6 @@ void  log_getconfig(log_t *g_log) {
+ 
+     sprintf(logparams_level[i].optname,    LOG_CONFIG_LEVEL_FORMAT,       g_log->log_component[i].name);
+     sprintf(logparams_logfile[i].optname,  LOG_CONFIG_LOGFILE_FORMAT,     g_log->log_component[i].name);
+-
+     /* workaround: all log options in existing configuration files use lower case component names
+        where component names include uppercase char in log.h....                                */
+     for (int j=0 ; j<strlen(logparams_level[i].optname); j++)
+@@ -430,6 +466,7 @@ int logInit (void) {
+ 
+   g_log->filelog_name = "/tmp/openair.log";
+   log_getconfig(g_log);
++  log_getconfig_mi();
+ 
+   // set all unused component items to 0, they are for non predefined components
+   for (i=MAX_LOG_PREDEF_COMPONENTS; i < MAX_LOG_COMPONENTS; i++) {
+diff --git a/common/utils/LOG/log.h b/common/utils/LOG/log.h
+index 28374a15a..c145897e0 100644
+--- a/common/utils/LOG/log.h
++++ b/common/utils/LOG/log.h
+@@ -178,7 +178,17 @@ extern "C" {
+ #define SET_LOG_DUMP(B)   g_log->dump_mask = (g_log->dump_mask | B)
+ #define CLEAR_LOG_DUMP(B) g_log->dump_mask = (g_log->dump_mask & (~B))
+ 
+-
++typedef enum {
++  MIN_LOG_MI_COMPONENTS = 0,
++  LTE_PDCP_DL_Cipher_Data_PDU = MIN_LOG_MI_COMPONENTS,
++  LTE_PDCP_UL_Cipher_Data_PDU,
++  LTE_MAC_DL_Transport_Block,
++  LTE_MAC_UL_Transport_Block,
++  LTE_RLC_UL_AM_All_PDU,
++  LTE_RLC_DL_AM_All_PDU,
++  MAX_LOG_MI_COMPONENTS,
++}
++comp_name_mi_t;
+ 
+ typedef enum {
+   MIN_LOG_COMPONENTS = 0,
+@@ -277,11 +287,17 @@ void log_set_instance_type (log_instance_type_t instance);
+ 
+ #ifdef LOG_MAIN
+ log_t *g_log;
++mapping mi_map[];
++mapping mi_name_map[];
++int log_mi_level[MAX_LOG_MI_COMPONENTS];
+ #else
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+   extern log_t *g_log;
++  extern mapping mi_map[];
++  extern mapping mi_name_map[];
++  extern int log_mi_level[MAX_LOG_MI_COMPONENTS];
+ #ifdef __cplusplus
+ }
+ #endif
+@@ -385,7 +401,7 @@ int32_t write_file_matlab(const char *fname, const char *vname, void *data, int
+ #    define LOG_I(c, x...) do { if (T_stdout) { if( g_log->log_component[c].level >= OAILOG_INFO   ) logRecord_mt(__FILE__, __FUNCTION__, __LINE__,c, OAILOG_INFO, x)    ;} else { T(T_LEGACY_ ## c ## _INFO, T_PRINTF(x))    ;}} while (0)
+ #    define LOG_D(c, x...) do { if (T_stdout) { if( g_log->log_component[c].level >= OAILOG_DEBUG  ) logRecord_mt(__FILE__, __FUNCTION__, __LINE__,c, OAILOG_DEBUG, x)   ;} else { T(T_LEGACY_ ## c ## _DEBUG, T_PRINTF(x))   ;}} while (0)
+ #    define LOG_T(c, x...) do { if (T_stdout) { if( g_log->log_component[c].level >= OAILOG_TRACE  ) logRecord_mt(__FILE__, __FUNCTION__, __LINE__,c, OAILOG_TRACE, x)   ;} else { T(T_LEGACY_ ## c ## _TRACE, T_PRINTF(x))   ;}} while (0)
+-#    define LOG_MI(c, ...) do { printf("[MI] %s ",c); printf(__VA_ARGS__); } while (0);
++#    define LOG_MI(c, ...) do { if ( log_mi_level[map_str_to_int(mi_map, c)] == 1 ) { printf("[MI] %s ",c); printf(__VA_ARGS__); } } while (0);
+ #    define VLOG(c,l, f, args) do { if (T_stdout) { if( g_log->log_component[c].level >= l  ) vlogRecord_mt(__FILE__, __FUNCTION__, __LINE__,c, l, f, args)   ;} } while (0)
+ /* macro used to dump a buffer or a message as in openair2/RRC/LTE/RRC_eNB.c, replaces LOG_F macro */
+ #    define LOG_DUMPMSG(c, f, b, s, x...) do {  if(g_log->dump_mask & f) log_dump(c, b, s, LOG_DUMP_CHAR, x)  ;}   while (0)  /* */
+-- 
+2.24.3 (Apple Git-128)
+
+
+From 11d8a42e0a15125850be8b80f3af6d9f55a24ce3 Mon Sep 17 00:00:00 2001
+From: Zhaowei <tan@cs.ucla.edu>
+Date: Tue, 10 Dec 2019 22:02:50 +0000
+Subject: [PATCH 10/14] fix asn1
+
+---
+ openair2/RRC/LTE/MESSAGES/asn1_msg.c | 30 ++++++++++++++++------------
+ 1 file changed, 17 insertions(+), 13 deletions(-)
+
+diff --git a/openair2/RRC/LTE/MESSAGES/asn1_msg.c b/openair2/RRC/LTE/MESSAGES/asn1_msg.c
+index c85af414e..e61307e4d 100644
+--- a/openair2/RRC/LTE/MESSAGES/asn1_msg.c
++++ b/openair2/RRC/LTE/MESSAGES/asn1_msg.c
+@@ -104,9 +104,9 @@
+ #endif
+ 
+ // #if !defined (XER_PRINT)
+-# define XER_PRINT
++// # define XER_PRINT
+ // #endif
+-# define DEBUG_ASN1 1
++// # define DEBUG_ASN1 1
+ 
+ 
+ typedef struct xer_sprint_string_s {
+@@ -249,6 +249,7 @@ uint8_t do_MIB_FeMBMS(rrc_eNB_carrier_data_t *carrier, uint32_t N_RB_DL, uint32_
+   //TODO additionalNonBMSFNSubframes-r14  INTEGER (0..3) ? 
+ 
+   //if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
++  //Zhehui
+     xer_fprint(stdout, &asn_DEF_LTE_BCCH_BCH_Message_MBMS, (void *)mib_fembms);
+   //}
+ 
+@@ -607,6 +608,7 @@ uint8_t do_SIB1_MBMS(rrc_eNB_carrier_data_t *carrier,
+ 
+ 
+   //if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
++  //Zhehui
+     xer_fprint(stdout, &asn_DEF_LTE_BCCH_DL_SCH_Message_MBMS, (void *)bcch_message);
+   //}
+ 
+@@ -2443,9 +2445,12 @@ uint8_t do_SIB23(uint8_t Mod_id,
+ 
+ #endif
+ 
+-  if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
++  //if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
++  //Zhehui
++    printf("[MI] 0xB0C1\n");
+     xer_fprint(stdout, &asn_DEF_LTE_BCCH_DL_SCH_Message, (void *)bcch_message);
+-  }
++    printf("[/MI]\n");
++  //}
+ 
+   enc_rval = uper_encode_to_buffer(&asn_DEF_LTE_BCCH_DL_SCH_Message,
+                                    NULL,
+@@ -3133,11 +3138,10 @@ do_RRCConnectionSetup(
+   mac_MainConfig->phr_Config->choice.setup.prohibitPHR_Timer = LTE_MAC_MainConfig__phr_Config__setup__prohibitPHR_Timer_sf20; // sf20 = 20 subframes // LTE_MAC_MainConfig__phr_Config__setup__prohibitPHR_Timer_sf1000
+   mac_MainConfig->phr_Config->choice.setup.dl_PathlossChange = LTE_MAC_MainConfig__phr_Config__setup__dl_PathlossChange_dB1;  // Value dB1 =1 dB, dB3 = 3 dB
+ 
+-  if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
+-    xer_fprint(stdout, &asn_DEF_LTE_DL_CCCH_Message, (void *)&dl_ccch_msg);
+-  }
++  //if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
++   // xer_fprint(stdout, &asn_DEF_LTE_DL_CCCH_Message, (void *)&dl_ccch_msg);
++  //}
+   //Zhehui
+-  LOG_E(RRC, "Sending setup message");
+   xer_fprint(stdout, &asn_DEF_LTE_DL_CCCH_Message, (void *)&dl_ccch_msg);
+ 
+   enc_rval = uper_encode_to_buffer(&asn_DEF_LTE_DL_CCCH_Message,
+@@ -3563,7 +3567,7 @@ uint8_t do_RRCConnectionSetup_BR(
+   // rrcConnectionSetup->criticalExtensions.choice.c1.choice.rrcConnectionSetup_r8.radioResourceConfigDedicated.mac_MainConfig = NULL;
+ 
+ #ifdef XER_PRINT
+-  LOG_E(RRC,"ZHEHUI printing");
++  //Zhehui
+   xer_fprint(stdout, &asn_DEF_LTE_DL_CCCH_Message, (void*)&dl_ccch_msg);
+ #endif
+   LOG_E(RRC, "Sending message");
+@@ -4252,9 +4256,9 @@ uint8_t do_RRCConnectionReestablishmentReject(uint8_t                    Mod_id,
+   // RRCConnectionReestablishmentReject
+   rrcConnectionReestablishmentReject->criticalExtensions.present = LTE_RRCConnectionReestablishmentReject__criticalExtensions_PR_rrcConnectionReestablishmentReject_r8;
+ 
+-  if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
++  //if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
+     xer_fprint(stdout, &asn_DEF_LTE_DL_CCCH_Message, (void *)&dl_ccch_msg);
+-  }
++  //}
+ 
+   enc_rval = uper_encode_to_buffer(&asn_DEF_LTE_DL_CCCH_Message,
+                                    NULL,
+@@ -4291,9 +4295,9 @@ uint8_t do_RRCConnectionReject(uint8_t                    Mod_id,
+   /* let's put a wait time of 1s for the moment */
+   rrcConnectionReject->criticalExtensions.choice.c1.choice.rrcConnectionReject_r8.waitTime = 1;
+ 
+-  if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
++  //if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
+     xer_fprint(stdout, &asn_DEF_LTE_DL_CCCH_Message, (void *)&dl_ccch_msg);
+-  }
++  //}
+ 
+   enc_rval = uper_encode_to_buffer(&asn_DEF_LTE_DL_CCCH_Message,
+                                    NULL,
+-- 
+2.24.3 (Apple Git-128)
+
+
+From 81d40c54597b07d2e1093b1bb1c502bf99f64006 Mon Sep 17 00:00:00 2001
+From: Zhaowei <tan@cs.ucla.edu>
+Date: Tue, 10 Dec 2019 23:58:36 +0000
+Subject: [PATCH 11/14] sample test config
+
+---
+ targets/PROJECTS/GENERIC-LTE-EPC/CONF/test.conf | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/targets/PROJECTS/GENERIC-LTE-EPC/CONF/test.conf b/targets/PROJECTS/GENERIC-LTE-EPC/CONF/test.conf
+index 14f0f3224..8f43c6441 100644
+--- a/targets/PROJECTS/GENERIC-LTE-EPC/CONF/test.conf
++++ b/targets/PROJECTS/GENERIC-LTE-EPC/CONF/test.conf
+@@ -292,7 +292,17 @@ THREAD_STRUCT = (
+        rlc_log_verbosity                     ="medium";
+        pdcp_log_level                        ="error";
+        pdcp_log_verbosity                    ="medium";
+-       rrc_log_level                         ="error";
++       rrc_log_level                         ="info";
+        rrc_log_verbosity                     ="medium";
+     };
+ 
++mi_log_level:
++  {
++       LTE_PDCP_DL_Cipher_Data_PDU           = 1;
++       LTE_PDCP_UL_Cipher_Data_PDU           = 1;
++       LTE_RLC_UL_AM_All_PDU                 = 1;
++       LTE_RLC_DL_AM_All_PDU                 = 1;
++       LTE_MAC_DL_Transport_Block            = 1;
++       LTE_MAC_UL_Transport_Block            = 1;
++       LTE_RRC_Event                         = 1;
++  };
+-- 
+2.24.3 (Apple Git-128)
+
+
+From 2e03c1251614331b03439d8136a97b9158d002cf Mon Sep 17 00:00:00 2001
+From: Zhehui Zhang <zhehui@cs.ucla.edu>
+Date: Sat, 14 Dec 2019 03:44:22 +0000
+Subject: [PATCH 12/14] update: reformat and add new mobileinsight rrc logs
+
+---
+ common/config/libconfig/config_libconfig.c    |  2 +
+ common/utils/LOG/log.c                        |  2 +
+ common/utils/LOG/log.h                        |  3 +-
+ openair2/RRC/LTE/rrc_eNB.c                    | 74 ++++++++++++-------
+ .../PROJECTS/GENERIC-LTE-EPC/CONF/test.conf   |  2 +-
+ 5 files changed, 53 insertions(+), 30 deletions(-)
+
+diff --git a/common/config/libconfig/config_libconfig.c b/common/config/libconfig/config_libconfig.c
+index 2d861f2dc..22729c9f0 100644
+--- a/common/config/libconfig/config_libconfig.c
++++ b/common/config/libconfig/config_libconfig.c
+@@ -263,9 +263,11 @@ int config_libconfig_get(paramdef_t *cfgoptions,int numoptions, char *prefix ) {
+     }
+   } /* for loop on options */
+ 
++  /*
+   printf("[LIBCONFIG] %s: %i/%i parameters successfully set, (%i to default value)\n",
+          ((prefix == NULL)?"(root)":prefix),
+          status,numoptions,numdefvals );
++  */
+ 
+   if (fatalerror == 1) {
+     fprintf(stderr,"[LIBCONFIG] fatal errors found when processing  %s \n", libconfig_privdata.configfile );
+diff --git a/common/utils/LOG/log.c b/common/utils/LOG/log.c
+index 0c5176aae..9e7b3689c 100644
+--- a/common/utils/LOG/log.c
++++ b/common/utils/LOG/log.c
+@@ -67,6 +67,7 @@ mapping mi_map[] = {
+   {"0xB064", LTE_MAC_UL_Transport_Block},
+   {"0xB092", LTE_RLC_UL_AM_All_PDU},
+   {"0xB082", LTE_RLC_DL_AM_All_PDU},
++  {"0xB0C2", LTE_RRC_Event},
+   {NULL, -1}
+ };
+ 
+@@ -77,6 +78,7 @@ mapping mi_name_map[] = {
+   {"LTE_RLC_UL_AM_All_PDU", LTE_RLC_UL_AM_All_PDU},
+   {"LTE_MAC_DL_Transport_Block", LTE_MAC_DL_Transport_Block},
+   {"LTE_MAC_UL_Transport_Block", LTE_MAC_UL_Transport_Block},
++  {"LTE_RRC_Event", LTE_RRC_Event},
+   {NULL, -1}
+ };
+ 
+diff --git a/common/utils/LOG/log.h b/common/utils/LOG/log.h
+index c145897e0..3c8132773 100644
+--- a/common/utils/LOG/log.h
++++ b/common/utils/LOG/log.h
+@@ -186,6 +186,7 @@ typedef enum {
+   LTE_MAC_UL_Transport_Block,
+   LTE_RLC_UL_AM_All_PDU,
+   LTE_RLC_DL_AM_All_PDU,
++  LTE_RRC_Event,
+   MAX_LOG_MI_COMPONENTS,
+ }
+ comp_name_mi_t;
+@@ -401,7 +402,7 @@ int32_t write_file_matlab(const char *fname, const char *vname, void *data, int
+ #    define LOG_I(c, x...) do { if (T_stdout) { if( g_log->log_component[c].level >= OAILOG_INFO   ) logRecord_mt(__FILE__, __FUNCTION__, __LINE__,c, OAILOG_INFO, x)    ;} else { T(T_LEGACY_ ## c ## _INFO, T_PRINTF(x))    ;}} while (0)
+ #    define LOG_D(c, x...) do { if (T_stdout) { if( g_log->log_component[c].level >= OAILOG_DEBUG  ) logRecord_mt(__FILE__, __FUNCTION__, __LINE__,c, OAILOG_DEBUG, x)   ;} else { T(T_LEGACY_ ## c ## _DEBUG, T_PRINTF(x))   ;}} while (0)
+ #    define LOG_T(c, x...) do { if (T_stdout) { if( g_log->log_component[c].level >= OAILOG_TRACE  ) logRecord_mt(__FILE__, __FUNCTION__, __LINE__,c, OAILOG_TRACE, x)   ;} else { T(T_LEGACY_ ## c ## _TRACE, T_PRINTF(x))   ;}} while (0)
+-#    define LOG_MI(c, ...) do { if ( log_mi_level[map_str_to_int(mi_map, c)] == 1 ) { printf("[MI] %s ",c); printf(__VA_ARGS__); } } while (0);
++#    define LOG_MI(c, ...) do { if ( log_mi_level[map_str_to_int(mi_map, c)] == 1 ) { printf("[MI] %s ",c); printf(__VA_ARGS__); printf("[/MI]\n"); } } while (0);
+ #    define VLOG(c,l, f, args) do { if (T_stdout) { if( g_log->log_component[c].level >= l  ) vlogRecord_mt(__FILE__, __FUNCTION__, __LINE__,c, l, f, args)   ;} } while (0)
+ /* macro used to dump a buffer or a message as in openair2/RRC/LTE/RRC_eNB.c, replaces LOG_F macro */
+ #    define LOG_DUMPMSG(c, f, b, s, x...) do {  if(g_log->dump_mask & f) log_dump(c, b, s, LOG_DUMP_CHAR, x)  ;}   while (0)  /* */
+diff --git a/openair2/RRC/LTE/rrc_eNB.c b/openair2/RRC/LTE/rrc_eNB.c
+index 154260ab7..7d4d10968 100644
+--- a/openair2/RRC/LTE/rrc_eNB.c
++++ b/openair2/RRC/LTE/rrc_eNB.c
+@@ -98,6 +98,10 @@
+ 
+ #include "SIMULATION/TOOLS/sim.h" // for taus
+ 
++//Zhehui
++// #define DEBUG_RRC 1
++#define RRC_DEFAULT_RAB_IS_AM
++
+ 
+ extern RAN_CONTEXT_t RC;
+ 
+@@ -1328,7 +1332,7 @@ rrc_eNB_generate_SecurityModeCommand(
+            ue_context_pP->ue_context.ciphering_algorithm,
+            ue_context_pP->ue_context.integrity_algorithm);
+   //Zhehui
+-  LOG_E(RRC, "MI: RRC SecurityModeCommand for UE %x\n", ctxt_pP->rnti);
++  LOG_MI("0xB0C2", "%x SecurityModeCommand %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+   LOG_DUMPMSG(RRC,DEBUG_RRC,(char *)buffer,size,"[MSG] RRC Security Mode Command\n");
+   LOG_I(RRC,
+         PROTOCOL_RRC_CTXT_UE_FMT" Logical Channel DL-DCCH, Generate SecurityModeCommand (bytes %d)\n",
+@@ -1382,7 +1386,7 @@ rrc_eNB_generate_UECapabilityEnquiry(
+            rrc_eNB_get_next_transaction_identifier(ctxt_pP->module_id));
+   //Zhehui
+ //Zhehui
+-          LOG_E(RRC, "MI: RRC UECapabilityEnquiry for UE %x\n", ctxt_pP->rnti);
++          LOG_MI("0xB0C2", "%x UECapabilityEnquiry %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+ 
+ 
+   LOG_I(RRC,
+@@ -1445,6 +1449,8 @@ rrc_eNB_generate_RRCConnectionReject(
+     MSC_AS_TIME_ARGS(ctxt_pP),
+     ue_context_pP == NULL ? -1 : ue_context_pP->ue_context.rnti,
+     ue_p->Srb0.Tx_buffer.payload_size);
++    //Zhehui
++  LOG_MI("0xB0C2", "%x RRCConnectionReject %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+   LOG_I(RRC,
+         PROTOCOL_RRC_CTXT_UE_FMT" [RAPROC] Logical Channel DL-CCCH, Generating LTE_RRCConnectionReject (bytes %d)\n",
+         PROTOCOL_RRC_CTXT_UE_ARGS(ctxt_pP),
+@@ -2135,7 +2141,7 @@ rrc_eNB_process_RRCConnectionReestablishmentComplete(
+     }
+   }
+   //Zhehui
+-  LOG_E(RRC,"MI: RRCConnectionReconfiguration for UE %x\n", ctxt_pP->rnti);
++  LOG_MI("0xB0C2", "%x RRCConnectionReconfiguration %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+ 
+   if(size==65535) {
+     LOG_E(RRC,"RRC decode err!!! do_RRCConnectionReconfiguration\n");
+@@ -2255,7 +2261,8 @@ rrc_eNB_generate_RRCConnectionReestablishmentReject(
+     MSC_AS_TIME_ARGS(ctxt_pP),
+     ue_context_pP == NULL ? -1 : ue_context_pP->ue_context.rnti,
+     ue_p->Srb0.Tx_buffer.payload_size);
+-
++//Zhehui
++  LOG_MI("0xB0C2", "%x RRCConnectionReestablishmentReject %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+   LOG_I(RRC,
+         PROTOCOL_RRC_CTXT_UE_FMT" [RAPROC] Logical Channel DL-CCCH, Generating LTE_RRCConnectionReestablishmentReject (bytes %d)\n",
+         PROTOCOL_RRC_CTXT_UE_ARGS(ctxt_pP),
+@@ -2303,6 +2310,8 @@ rrc_eNB_generate_RRCConnectionRelease(
+     ue_context_pP->ue_context.rnti,
+     rrc_eNB_mui,
+     size);
++  //Zhehui
++  LOG_MI("0xB0C2", "%x RRCConnectionRelease %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+   while (pthread_mutex_trylock(&rrc_release_freelist)) {
+     /* spin... */
+   }
+@@ -2381,7 +2390,7 @@ rrc_eNB_generate_dedicatedRRCConnectionReconfiguration(const protocol_ctxt_t *co
+   uint8_t xid = rrc_eNB_get_next_transaction_identifier(ctxt_pP->module_id);   //Transaction_id,
+   DRB_configList2=&ue_context_pP->ue_context.DRB_configList2[xid];
+ //Zhehui
+-          LOG_E(RRC, "MI: RRCConnectionReconfiguration for UE %x\n", ctxt_pP->rnti);
++  LOG_MI("0xB0C2", "%x RRCConnectionReconfiguration %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+ 
+ 
+   if (*DRB_configList2) {
+@@ -3066,7 +3075,7 @@ void rrc_eNB_generate_defaultRRCConnectionReconfiguration(const protocol_ctxt_t
+     T_INT(ctxt_pP->subframe), 
+     T_INT(ctxt_pP->rnti));
+ //Zhehui
+-          LOG_E(RRC, "MI: RRCConnectionReconfiguration for UE %x\n", ctxt_pP->rnti);
++  LOG_MI("0xB0C2", "%x RRCConnectionReconfiguration %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+ 
+ 
+   /* Configure SRB2 */
+@@ -6868,7 +6877,7 @@ rrc_eNB_generate_RRCConnectionSetup(
+                             &ue_context_pP->ue_context.physicalConfigDedicated);
+   }
+   //Zhehui
+-  LOG_E(RRC, "MI: RRCConnectionSetup for UE%x\n", ctxt_pP->rnti);
++  LOG_MI("0xB0C2", "%x RRCConnectionSetup %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+   LOG_DUMPMSG(RRC,DEBUG_RRC,
+               (char *)(ue_p->Srb0.Tx_buffer.Payload),
+               ue_p->Srb0.Tx_buffer.payload_size,
+@@ -7200,6 +7209,9 @@ rrc_eNB_decode_ccch(
+     return -1;
+   }
+ 
++  //Zhehui
++        xer_fprint(stdout, &asn_DEF_LTE_UL_CCCH_Message, (void *)ul_ccch_msg);
++
+   if (ul_ccch_msg->message.present == LTE_UL_CCCH_MessageType_PR_c1) {
+     switch (ul_ccch_msg->message.choice.c1.present) {
+       case LTE_UL_CCCH_MessageType__c1_PR_NOTHING:
+@@ -7214,7 +7226,7 @@ rrc_eNB_decode_ccch(
+         LOG_DUMPMSG(RRC,DEBUG_RRC,(char *)(buffer), buffer_length,
+                     "[MSG] RRC Connection Reestablishment Request\n");
+ 	//Zhehui
+-	LOG_E(RRC, "MI: RRCConnectionReestablishment from UE %x\n", ctxt_pP->rnti);
++	LOG_MI("0xB0C2", "%x RRCConnectionReestablishment %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+         LOG_D(RRC,
+               PROTOCOL_RRC_CTXT_UE_FMT"MAC_eNB--- MAC_DATA_IND (rrcConnectionReestablishmentRequest on SRB0) --> RRC_eNB\n",
+               PROTOCOL_RRC_CTXT_UE_ARGS(ctxt_pP));
+@@ -7439,6 +7451,7 @@ rrc_eNB_decode_ccch(
+              LOG_DUMPMSG(RRC,DEBUG_RRC,(char *)buffer,
+                   buffer_length,
+                     "[MSG] RRC Connection Request\n");
++	// LOG_E(RRC, (char *)buffer);
+         LOG_D(RRC,
+               PROTOCOL_RRC_CTXT_UE_FMT"MAC_eNB --- MAC_DATA_IND  (rrcConnectionRequest on SRB0) --> RRC_eNB\n",
+               PROTOCOL_RRC_CTXT_UE_ARGS(ctxt_pP));
+@@ -7446,7 +7459,9 @@ rrc_eNB_decode_ccch(
+                          RC.rrc[ctxt_pP->module_id],
+                          ctxt_pP->rnti);
+ //Zhehui
++        //xer_fprint(stdout, &asn_DEF_LTE_UL_CCCH_Message, (void *)ul_ccch_msg);
+ 	//LOG_E(RRC, "MI: RRCConnectionRequest from UE %x", ue_context_p->ue_context.rnti);
++	
+  
+         if (ue_context_p != NULL) {
+           // erase content
+@@ -7535,7 +7550,7 @@ rrc_eNB_decode_ccch(
+                 ue_context_p->ue_context.reestablishment_xid = -1;
+               } else {
+ 		//Zhehui
+-                LOG_E(RRC,"MI: RRC Connection Request from a new UE\n");
++                LOG_MI("0xB0C2", "0000 RRCConnectionSetupRequest\n");
+                 LOG_I(RRC," S-TMSI doesn't exist, setting Initialue_identity_s_TMSI.m_tmsi to %p => %x\n",ue_context_p,m_tmsi);
+                 //              ue_context_p = rrc_eNB_get_next_free_ue_context(ctxt_pP, NOT_A_RANDOM_UE_IDENTITY);
+                 ue_context_p = rrc_eNB_get_next_free_ue_context(ctxt_pP,random_value);
+@@ -7668,7 +7683,7 @@ rrc_eNB_decode_ccch(
+                LCHAN_DESC_SIZE);
+         rrc_eNB_generate_RRCConnectionSetup(ctxt_pP, ue_context_p, CC_id);
+          //Zhehui
+-	    //LOG_E(RRC, "MI: Initializating Signal Radio Bearer 1 for UE %x\n", ctxt_pP->rnti);
++	    //LOG_E(RRC, "MI: Initializating Signal Radio Bearer 1 for UE %x %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+ 
+  LOG_I(RRC, PROTOCOL_RRC_CTXT_UE_FMT"CALLING RLC CONFIG SRB1 (rbid %d)\n",
+               PROTOCOL_RRC_CTXT_UE_ARGS(ctxt_pP),
+@@ -7787,6 +7802,11 @@ rrc_eNB_decode_dcch(
+                    ctxt_pP->rnti);
+ 
+   if (ul_dcch_msg->message.present == LTE_UL_DCCH_MessageType_PR_c1) {
++//Zhehui
++    //TODO
++    printf("[MI] 0xB0C1\n");
++    xer_fprint(stdout, &asn_DEF_LTE_UL_DCCH_Message, (void *)ul_dcch_msg);
++    printf("[/MI]\n");
+     switch (ul_dcch_msg->message.choice.c1.present) {
+       case LTE_UL_DCCH_MessageType__c1_PR_NOTHING:   /* No components present */
+         break;
+@@ -7798,7 +7818,7 @@ rrc_eNB_decode_dcch(
+ 
+         // to avoid segmentation fault
+         if(!ue_context_p) {
+-          LOG_I(RRC, "Processing measurementReport UE %x, ue_context_p is NULL\n", ctxt_pP->rnti);
++          LOG_I(RRC, "Processing measurementReport UE %x, ue_context_p is NULL %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+           break;
+         }
+ 
+@@ -7819,11 +7839,11 @@ rrc_eNB_decode_dcch(
+ 
+         // to avoid segmentation fault
+         if(!ue_context_p) {
+-          LOG_I(RRC, "Processing LTE_RRCConnectionReconfigurationComplete UE %x, ue_context_p is NULL\n", ctxt_pP->rnti);
++          LOG_I(RRC, "Processing LTE_RRCConnectionReconfigurationComplete UE %x, ue_context_p is NULL %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+           break;
+         }
+ //Zhehui
+-          LOG_E(RRC, "MI: RRCConnectionReconfigurationComplete from UE %x\n", ctxt_pP->rnti);
++          LOG_MI("0xB0C2", "%x RRCConnectionReconfigurationComplete %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+ 
+         LOG_DUMPMSG(RRC,DEBUG_RRC,(char *)(Rx_sdu),sdu_sizeP,
+                     "[MSG] RRC Connection Reconfiguration Complete\n");
+@@ -8015,7 +8035,7 @@ rrc_eNB_decode_dcch(
+         LOG_DUMPMSG(RRC,DEBUG_RRC,(char *)Rx_sdu,sdu_sizeP,
+                     "[MSG] RRC Connection Reestablishment Complete\n");
+       //Zhehui
+-          LOG_E(RRC, "MI: RRCConnectionReconfigurationComplete from UE %x\n", ctxt_pP->rnti);
++          LOG_MI("0xB0C2", "%x RRCConnectionReconfigurationComplete %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+ 
+   MSC_LOG_RX_MESSAGE(
+           MSC_RRC_ENB,
+@@ -8096,12 +8116,12 @@ rrc_eNB_decode_dcch(
+ 
+         // to avoid segmentation fault
+         if(!ue_context_p) {
+-          LOG_I(RRC, "Processing LTE_RRCConnectionSetupComplete UE %x, ue_context_p is NULL\n", ctxt_pP->rnti);
++          LOG_I(RRC, "Processing LTE_RRCConnectionSetupComplete UE %x, ue_context_p is NULL %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+           break;
+         }
+ 
+ 	//Zhehui
+-	LOG_E(RRC, "MI: RRCConnectionSetupComplete from UE %x\n", ctxt_pP->rnti);
++	LOG_MI("0xB0C2", "%x RRCConnectionSetupComplete %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+ 
+         LOG_DUMPMSG(RRC,DEBUG_RRC,(char *)Rx_sdu,sdu_sizeP,
+                     "[MSG] RRC Connection SetupComplete\n");
+@@ -8153,11 +8173,11 @@ rrc_eNB_decode_dcch(
+ 
+         // to avoid segmentation fault
+         if(!ue_context_p) {
+-          LOG_I(RRC, "Processing securityModeComplete UE %x, ue_context_p is NULL\n", ctxt_pP->rnti);
++          LOG_I(RRC, "Processing securityModeComplete UE %x, ue_context_p is NULL %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+           break;
+         }
+ //Zhehui
+-          LOG_E(RRC, "RRC SecurityModeComplete from UE %x\n", ctxt_pP->rnti);
++          LOG_MI("0xB0C2", "%x SecurityModeComplete %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+ 
+ 
+         LOG_DUMPMSG(RRC,DEBUG_RRC,(char *)Rx_sdu,sdu_sizeP,
+@@ -8218,7 +8238,8 @@ rrc_eNB_decode_dcch(
+         if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
+           xer_fprint(stdout, &asn_DEF_LTE_UL_DCCH_Message, (void *)ul_dcch_msg);
+         }
+-
++  //Zhehui
++  LOG_MI("0xB0C2", "%x SecurityModeFailure %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+         // cancel the security mode in PDCP
+         // followup with the remaining procedure
+         //#warning "LG Removed rrc_eNB_generate_UECapabilityEnquiry after receiving securityModeFailure"
+@@ -8231,11 +8252,11 @@ rrc_eNB_decode_dcch(
+ 
+         // to avoid segmentation fault
+         if(!ue_context_p) {
+-          LOG_I(RRC, "Processing ueCapabilityInformation UE %x, ue_context_p is NULL\n", ctxt_pP->rnti);
++          LOG_I(RRC, "Processing ueCapabilityInformation UE %x, ue_context_p is NULL %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+           break;
+         }
+ //Zhehui
+-          LOG_E(RRC, "RRC UECapabilityInformation from UE %x\n", ctxt_pP->rnti);
++        LOG_MI("0xB0C2", "%x UECapabilityInformation %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+ 
+ 
+         LOG_DUMPMSG(RRC,DEBUG_RRC,(char *)Rx_sdu,sdu_sizeP,
+@@ -8264,10 +8285,10 @@ rrc_eNB_decode_dcch(
+           xer_fprint(stdout, &asn_DEF_LTE_UL_DCCH_Message, (void *)ul_dcch_msg);
+         }
+ 
+-        LOG_I(RRC, "got UE capabilities for UE %x\n", ctxt_pP->rnti);
++        LOG_I(RRC, "got UE capabilities for UE %x %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+ 
+         if (ue_context_p->ue_context.UE_Capability) {
+-          LOG_I(RRC, "freeing old UE capabilities for UE %x\n", ctxt_pP->rnti);
++          LOG_I(RRC, "freeing old UE capabilities for UE %x %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+           ASN_STRUCT_FREE(asn_DEF_LTE_UE_EUTRA_Capability,
+                           ue_context_p->ue_context.UE_Capability);
+           ue_context_p->ue_context.UE_Capability = 0;
+@@ -8331,11 +8352,11 @@ rrc_eNB_decode_dcch(
+ 
+         // to avoid segmentation fault
+         if(!ue_context_p) {
+-          LOG_I(RRC, "Processing ulInformationTransfer UE %x, ue_context_p is NULL\n", ctxt_pP->rnti);
++          LOG_I(RRC, "Processing ulInformationTransfer UE %x, ue_context_p is NULL %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+           break;
+         }
+ //Zhehui
+-          LOG_E(RRC, "MI: ULInformationTransfer from UE %x\n", ctxt_pP->rnti);
++        LOG_MI("0xB0C2", "%x ULInformationTransfer %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+ 
+ 
+         LOG_D(RRC,"[MSG] RRC UL Information Transfer \n");
+@@ -9515,9 +9536,6 @@ LTE_SL_CommConfig_r12_t rrc_eNB_get_sidelink_commTXPool( const protocol_ctxt_t *
+   sc_CommTxConfig->ue_SelectedResourceConfig_r12->data_TF_ResourceConfig_r12.subframeBitmap_r12.choice.bs4_r12.buf[0] = 0xF0;
+   sc_CommTxConfig->ue_SelectedResourceConfig_r12->data_TF_ResourceConfig_r12.subframeBitmap_r12.choice.bs4_r12.buf[1] = 0xFF;
+   sc_CommTxConfig->ue_SelectedResourceConfig_r12->data_TF_ResourceConfig_r12.subframeBitmap_r12.choice.bs4_r12.buf[2] = 0xFF;
+-  sc_CommTxConfig->ue_SelectedResourceConfig_r12->data_TF_ResourceConfig_r12.subframeBitmap_r12.choice.bs4_r12.buf[3] = 0xFF;
+-  sc_CommTxConfig->ue_SelectedResourceConfig_r12->data_TF_ResourceConfig_r12.subframeBitmap_r12.choice.bs4_r12.buf[4] = 0xFF;
+-  //rxParametersNCell_r12
+   sc_CommTxConfig->rxParametersNCell_r12 = CALLOC (1, sizeof (*sc_CommTxConfig->rxParametersNCell_r12));
+   sc_CommTxConfig->rxParametersNCell_r12->tdd_Config_r12 = CALLOC (1, sizeof (*sc_CommTxConfig->rxParametersNCell_r12->tdd_Config_r12 ));
+   sc_CommTxConfig->rxParametersNCell_r12->tdd_Config_r12->subframeAssignment = 0 ;
+diff --git a/targets/PROJECTS/GENERIC-LTE-EPC/CONF/test.conf b/targets/PROJECTS/GENERIC-LTE-EPC/CONF/test.conf
+index 8f43c6441..a8c9b8c6e 100644
+--- a/targets/PROJECTS/GENERIC-LTE-EPC/CONF/test.conf
++++ b/targets/PROJECTS/GENERIC-LTE-EPC/CONF/test.conf
+@@ -280,7 +280,7 @@ THREAD_STRUCT = (
+ 
+      log_config :
+      {
+-       global_log_level                      ="info";
++       global_log_level                      ="error";
+        global_log_verbosity                  ="medium";
+        hw_log_level                          ="error";
+        hw_log_verbosity                      ="medium";
+-- 
+2.24.3 (Apple Git-128)
+
+
+From ca8c0618f0f573db1dce060868b0b1732cd584e1 Mon Sep 17 00:00:00 2001
+From: Zhaowei <tan@cs.ucla.edu>
+Date: Fri, 20 Nov 2020 01:56:39 +0000
+Subject: [PATCH 13/14] adjust formatting
+
+---
+ openair2/LAYER2/MAC/eNB_scheduler_ulsch.c | 16 ++++++++++++++--
+ openair2/LAYER2/PDCP_v10.1.0/pdcp.c       | 12 ++++++------
+ openair2/LAYER2/RLC/AM_v9.3.0/rlc_am.c    |  7 ++++++-
+ 3 files changed, 26 insertions(+), 9 deletions(-)
+
+diff --git a/openair2/LAYER2/MAC/eNB_scheduler_ulsch.c b/openair2/LAYER2/MAC/eNB_scheduler_ulsch.c
+index 05dd1fec0..71d40105d 100644
+--- a/openair2/LAYER2/MAC/eNB_scheduler_ulsch.c
++++ b/openair2/LAYER2/MAC/eNB_scheduler_ulsch.c
+@@ -258,7 +258,9 @@ rx_sdu(const module_id_t enb_mod_idP,
+       first_rb = UE_template_ptr->first_rb_ul[harq_pid];
+ 
+       /* Program NACK for PHICH */
+-      LOG_D(MAC, "Programming PHICH NACK for rnti %x harq_pid %d (first_rb %d)\n",
++      LOG_I(MAC, "Programming PHICH NACK for frame %d, subframe %d, rnti %x harq_pid %d (first_rb %d)\n",
++            frameP,
++	    subframeP,
+             current_rnti,
+             harq_pid,
+             first_rb);
+@@ -890,6 +892,7 @@ rx_sdu(const module_id_t enb_mod_idP,
+             }
+ 
+             if ((rx_lengths[i] < SCH_PAYLOAD_SIZE_MAX) && (rx_lengths[i] > 0)) {  // MAX SIZE OF transport block
++              LOG_MI("0xB092", "%d ", subframeP);
+               mac_rlc_data_ind(enb_mod_idP, current_rnti, enb_mod_idP, frameP, ENB_FLAG_YES, MBMS_FLAG_NO, rx_lcids[i], (char *) payload_ptr, rx_lengths[i], 1, NULL);
+               UE_list->eNB_UE_stats[CC_idP][UE_id].num_pdu_rx[rx_lcids[i]] += 1;
+               UE_list->eNB_UE_stats[CC_idP][UE_id].num_bytes_rx[rx_lcids[i]] += rx_lengths[i];
+@@ -947,7 +950,9 @@ rx_sdu(const module_id_t enb_mod_idP,
+   }
+ 
+   /* Program ACK for PHICH */
+-  LOG_D(MAC, "Programming PHICH ACK for rnti %x harq_pid %d (first_rb %d)\n",
++  LOG_I(MAC, "Programming PHICH ACK for frame %d, subframe %d, rnti %x harq_pid %d (first_rb %d)\n",
++        frameP,
++	subframeP,
+         current_rnti,
+         harq_pid,
+         first_rb);
+@@ -1600,6 +1605,13 @@ schedule_ulsch_rnti(module_id_t   module_idP,
+            */
+           snr = (5 * UE_sched_ctrl_ptr->pusch_snr[CC_id] - 640) / 10;
+           target_snr = mac->puSch10xSnr / 10;
++	  LOG_I(MAC, "[eNB %d] ULSCH scheduler: frame %d, subframe %d, harq_pid %d, snr/target snr %d/%d\n",
++                  module_idP,
++                  frameP,
++                  subframeP,
++                  harq_pid,
++                  snr,
++                  target_snr);
+ 
+           /*
+            * This assumes accumulated tpc
+diff --git a/openair2/LAYER2/PDCP_v10.1.0/pdcp.c b/openair2/LAYER2/PDCP_v10.1.0/pdcp.c
+index 2761d7566..4dc2a6ce7 100644
+--- a/openair2/LAYER2/PDCP_v10.1.0/pdcp.c
++++ b/openair2/LAYER2/PDCP_v10.1.0/pdcp.c
+@@ -351,7 +351,7 @@ boolean_t pdcp_data_req(
+      * to see if RLC succeeded
+      */
+ 
+-    LOG_MI("0xB0A3", "Frame %d Subframe %d Sequence %d\n", ctxt_pP->frame, ctxt_pP->subframe, current_sn);
++    LOG_MI("0xB0A3", "%d %d %d\n", ctxt_pP->frame, ctxt_pP->subframe, current_sn);
+     LOG_DUMPMSG(PDCP,DEBUG_PDCP,(char *)pdcp_pdu_p->data,pdcp_pdu_size,
+                 "[MSG] PDCP DL %s PDU on rb_id %d\n",(srb_flagP)? "CONTROL" : "DATA", rb_idP);
+ 
+@@ -455,7 +455,7 @@ boolean_t pdcp_data_req(
+       }
+     }
+  
+-    LOG_MI("0xB0A3", "After Sending: Frame %d Subframe %d Sequence %d\n", ctxt_pP->frame, ctxt_pP->subframe, current_sn);
++    // LOG_MI("0xB0A3", "After Sending: Frame %d Subframe %d Sequence %d\n", ctxt_pP->frame, ctxt_pP->subframe, current_sn);
+   }
+ 
+   if (ctxt_pP->enb_flag == ENB_FLAG_YES) {
+@@ -933,8 +933,8 @@ pdcp_data_ind(
+    * from its second byte (skipping 0th and 1st octets, i.e.
+    * PDCP header)
+    */
+-  LOG_MI("0xB0B3", "MI: frame: %d, subframe: %d, sequence number: %d, size: %d Mode %d\n",
+-    ctxt_pP->frame, ctxt_pP->subframe, sequence_number, sdu_buffer_sizeP - payload_offset, pdcp_p->rlc_mode);
++  // LOG_MI("0xB0B3", "MI: frame: %d, subframe: %d, sequence number: %d, size: %d Mode %d\n",
++  //  ctxt_pP->frame, ctxt_pP->subframe, sequence_number, sdu_buffer_sizeP - payload_offset, pdcp_p->rlc_mode);
+ 
+   if (LINK_ENB_PDCP_TO_GTPV1U) {
+     if ((TRUE == ctxt_pP->enb_flag) && (FALSE == srb_flagP)) {
+@@ -1079,8 +1079,8 @@ pdcp_data_ind(
+     stop_meas(&UE_pdcp_stats[ctxt_pP->module_id].data_ind);
+   }
+ 
+-LOG_MI("0xB0B3", "MI: After sending to GPT frame: %d, subframe: %d, sequence number: %d, Mode %d\n",
+-    ctxt_pP->frame, ctxt_pP->subframe, sequence_number, pdcp_p->rlc_mode);
++  LOG_MI("0xB0B3", "%d %d %d %d %d\n",
++    ctxt_pP->frame, ctxt_pP->subframe, sequence_number, sdu_buffer_sizeP - payload_offset, pdcp_p->rlc_mode);
+ 
+   VCD_SIGNAL_DUMPER_DUMP_FUNCTION_BY_NAME(VCD_SIGNAL_DUMPER_FUNCTIONS_PDCP_DATA_IND,VCD_FUNCTION_OUT);
+   return TRUE;
+diff --git a/openair2/LAYER2/RLC/AM_v9.3.0/rlc_am.c b/openair2/LAYER2/RLC/AM_v9.3.0/rlc_am.c
+index 2e997e58b..52eb45530 100644
+--- a/openair2/LAYER2/RLC/AM_v9.3.0/rlc_am.c
++++ b/openair2/LAYER2/RLC/AM_v9.3.0/rlc_am.c
+@@ -1021,7 +1021,12 @@ rlc_am_mac_data_indication (
+         tb_size_in_bytes   = ((struct mac_tb_ind *) (tb_p->data))->size;
+         if ((((struct mac_tb_ind *) (tb_p->data))->data_ptr[0] & RLC_DC_MASK) == RLC_DC_DATA_PDU ) {
+           if (rlc_am_get_data_pdu_infos(ctxt_pP,l_rlc_p,rlc_am_pdu_sn_10_p, tb_size_in_bytes, &pdu_info) >= 0) {
+-            LOG_MI("0xB092", "%d %d %d %d %d %d\n", ctxt_pP->frame, ctxt_pP->subframe, l_rlc_p->rb_id, tb_size_in_bytes, pdu_info.header_size, pdu_info.payload_size);
++            LOG_MI("0xB092", "1 %d %d %d %d %d %d\n", ctxt_pP->frame, ctxt_pP->subframe, l_rlc_p->rb_id, tb_size_in_bytes, pdu_info.header_size, pdu_info.payload_size);
++          }
++        } else {
++          if (rlc_am_get_control_pdu_infos(rlc_am_pdu_sn_10_p, &tb_size_in_bytes, &l_rlc_p->control_pdu_info) >= 0) {
++            tb_size_in_bytes   = ((struct mac_tb_req *) (tb_p->data))->tb_size;
++            LOG_MI("0xB092", "0 %d %d %d %d %d %d\n", ctxt_pP->frame, ctxt_pP->subframe, l_rlc_p->rb_id, tb_size_in_bytes, tb_size_in_bytes, 0);
+           }
+         }
+         tb_p = tb_p->next;
+-- 
+2.24.3 (Apple Git-128)
+
+
+From ba1812b77afa13eb567fd0bfe70440b768cb5cd7 Mon Sep 17 00:00:00 2001
+From: Siqi Liu <siqiliu@siqis-mbp.home>
+Date: Thu, 19 Nov 2020 23:59:50 -0800
+Subject: [PATCH 14/14] adjust format for generating clean patch
+
+---
+ common/config/libconfig/config_libconfig.c    |  6 --
+ .../LAYER2/MAC/eNB_scheduler_primitives.c     |  5 --
+ openair2/LAYER2/PDCP_v10.1.0/pdcp.c           |  3 -
+ openair2/RRC/LTE/MESSAGES/asn1_msg.c          | 58 +++------------
+ openair2/RRC/LTE/rrc_eNB.c                    | 70 ++-----------------
+ 5 files changed, 16 insertions(+), 126 deletions(-)
+
+diff --git a/common/config/libconfig/config_libconfig.c b/common/config/libconfig/config_libconfig.c
+index 22729c9f0..a30225dde 100644
+--- a/common/config/libconfig/config_libconfig.c
++++ b/common/config/libconfig/config_libconfig.c
+@@ -263,12 +263,6 @@ int config_libconfig_get(paramdef_t *cfgoptions,int numoptions, char *prefix ) {
+     }
+   } /* for loop on options */
+ 
+-  /*
+-  printf("[LIBCONFIG] %s: %i/%i parameters successfully set, (%i to default value)\n",
+-         ((prefix == NULL)?"(root)":prefix),
+-         status,numoptions,numdefvals );
+-  */
+-
+   if (fatalerror == 1) {
+     fprintf(stderr,"[LIBCONFIG] fatal errors found when processing  %s \n", libconfig_privdata.configfile );
+     config_libconfig_end();
+diff --git a/openair2/LAYER2/MAC/eNB_scheduler_primitives.c b/openair2/LAYER2/MAC/eNB_scheduler_primitives.c
+index 1c3961055..aa110b78b 100644
+--- a/openair2/LAYER2/MAC/eNB_scheduler_primitives.c
++++ b/openair2/LAYER2/MAC/eNB_scheduler_primitives.c
+@@ -5090,11 +5090,6 @@ SR_indication(module_id_t mod_idP,
+           cc_idP);
+   }
+ 
+-  /*LOG_E(MAC, "[MI] PUCCH-SR Frame %d subframe %d UE_id %d on CC_id%d\n",
+-		  frameP,
+-		  subframeP,
+-		  UE_id,
+-		  cc_idP);*/ // PHY-qianru: SR
+   LOG_MI("0xB13C", "Frame_num %d subframe_num %d UE_id %d on CC_id %d\n",
+ 		  frameP,
+ 		  subframeP,
+diff --git a/openair2/LAYER2/PDCP_v10.1.0/pdcp.c b/openair2/LAYER2/PDCP_v10.1.0/pdcp.c
+index 4dc2a6ce7..1b8c38a2b 100644
+--- a/openair2/LAYER2/PDCP_v10.1.0/pdcp.c
++++ b/openair2/LAYER2/PDCP_v10.1.0/pdcp.c
+@@ -455,7 +455,6 @@ boolean_t pdcp_data_req(
+       }
+     }
+  
+-    // LOG_MI("0xB0A3", "After Sending: Frame %d Subframe %d Sequence %d\n", ctxt_pP->frame, ctxt_pP->subframe, current_sn);
+   }
+ 
+   if (ctxt_pP->enb_flag == ENB_FLAG_YES) {
+@@ -933,8 +932,6 @@ pdcp_data_ind(
+    * from its second byte (skipping 0th and 1st octets, i.e.
+    * PDCP header)
+    */
+-  // LOG_MI("0xB0B3", "MI: frame: %d, subframe: %d, sequence number: %d, size: %d Mode %d\n",
+-  //  ctxt_pP->frame, ctxt_pP->subframe, sequence_number, sdu_buffer_sizeP - payload_offset, pdcp_p->rlc_mode);
+ 
+   if (LINK_ENB_PDCP_TO_GTPV1U) {
+     if ((TRUE == ctxt_pP->enb_flag) && (FALSE == srb_flagP)) {
+diff --git a/openair2/RRC/LTE/MESSAGES/asn1_msg.c b/openair2/RRC/LTE/MESSAGES/asn1_msg.c
+index e61307e4d..f1421bec7 100644
+--- a/openair2/RRC/LTE/MESSAGES/asn1_msg.c
++++ b/openair2/RRC/LTE/MESSAGES/asn1_msg.c
+@@ -103,12 +103,6 @@
+   #define msg printf
+ #endif
+ 
+-// #if !defined (XER_PRINT)
+-// # define XER_PRINT
+-// #endif
+-// # define DEBUG_ASN1 1
+-
+-
+ typedef struct xer_sprint_string_s {
+   char *string;
+   size_t string_size;
+@@ -249,7 +243,6 @@ uint8_t do_MIB_FeMBMS(rrc_eNB_carrier_data_t *carrier, uint32_t N_RB_DL, uint32_
+   //TODO additionalNonBMSFNSubframes-r14  INTEGER (0..3) ? 
+ 
+   //if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
+-  //Zhehui
+     xer_fprint(stdout, &asn_DEF_LTE_BCCH_BCH_Message_MBMS, (void *)mib_fembms);
+   //}
+ 
+@@ -608,7 +601,6 @@ uint8_t do_SIB1_MBMS(rrc_eNB_carrier_data_t *carrier,
+ 
+ 
+   //if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
+-  //Zhehui
+     xer_fprint(stdout, &asn_DEF_LTE_BCCH_DL_SCH_Message_MBMS, (void *)bcch_message);
+   //}
+ 
+@@ -878,8 +870,6 @@ uint8_t do_SIB1(rrc_eNB_carrier_data_t *carrier,
+   //  assign_enum(&(*sib1)->cellAccessRelatedInfo.intraFreqReselection,SystemInformationBlockType1__cellAccessRelatedInfo__intraFreqReselection_allowed);
+   (*sib1)->cellAccessRelatedInfo.intraFreqReselection=LTE_SystemInformationBlockType1__cellAccessRelatedInfo__intraFreqReselection_notAllowed;
+   (*sib1)->cellAccessRelatedInfo.csg_Indication=0;
+-//Zhehui
+-//  (*sib1)->cellSelectionInfo.q_RxLevMin=-65;
+   (*sib1)->cellSelectionInfo.q_RxLevMin=-65;
+   (*sib1)->cellSelectionInfo.q_RxLevMinOffset=NULL;
+   //(*sib1)->p_Max = CALLOC(1, sizeof(P_Max_t));
+@@ -898,9 +888,7 @@ uint8_t do_SIB1(rrc_eNB_carrier_data_t *carrier,
+   //  ASN_SEQUENCE_ADD(&schedulingInfo.sib_MappingInfo.list,NULL);
+ #if defined(ENABLE_ITTI)
+ 
+-  //Zhehui
+   if (configuration->frame_type[CC_id] == TDD)
+-  //if (true)
+ #endif
+   {
+     (*sib1)->tdd_Config =                             CALLOC(1,sizeof(struct LTE_TDD_Config));
+@@ -2445,12 +2433,9 @@ uint8_t do_SIB23(uint8_t Mod_id,
+ 
+ #endif
+ 
+-  //if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
+-  //Zhehui
+-    printf("[MI] 0xB0C1\n");
+-    xer_fprint(stdout, &asn_DEF_LTE_BCCH_DL_SCH_Message, (void *)bcch_message);
+-    printf("[/MI]\n");
+-  //}
++  printf("[MI] 0xB0C1\n");
++  xer_fprint(stdout, &asn_DEF_LTE_BCCH_DL_SCH_Message, (void *)bcch_message);
++  printf("[/MI]\n");
+ 
+   enc_rval = uper_encode_to_buffer(&asn_DEF_LTE_BCCH_DL_SCH_Message,
+                                    NULL,
+@@ -2836,9 +2821,7 @@ do_RRCConnectionSetup(
+   logicalchannelgroup = CALLOC(1,sizeof(long));
+   *logicalchannelgroup=0;
+   SRB1_ul_SpecificParameters->logicalChannelGroup = logicalchannelgroup;
+-  //Zhehui
+   ASN_SEQUENCE_ADD(&(*SRB_configList)->list,SRB1_config);
+-  //free(*SRB_configList);
+   // PhysicalConfigDedicated
+   physicalConfigDedicated2 = CALLOC(1,sizeof(*physicalConfigDedicated2));
+   *physicalConfigDedicated = physicalConfigDedicated2;
+@@ -3100,9 +3083,7 @@ do_RRCConnectionSetup(
+   rrcConnectionSetup->rrc_TransactionIdentifier = Transaction_id;
+   rrcConnectionSetup->criticalExtensions.present = LTE_RRCConnectionSetup__criticalExtensions_PR_c1;
+   rrcConnectionSetup->criticalExtensions.choice.c1.present = LTE_RRCConnectionSetup__criticalExtensions__c1_PR_rrcConnectionSetup_r8 ;
+-//Zhehui
+   rrcConnectionSetup->criticalExtensions.choice.c1.choice.rrcConnectionSetup_r8.radioResourceConfigDedicated.srb_ToAddModList = *SRB_configList;
+-  //rrcConnectionSetup->criticalExtensions.choice.c1.choice.rrcConnectionSetup_r8.radioResourceConfigDedicated.srb_ToAddModList = NULL;
+   rrcConnectionSetup->criticalExtensions.choice.c1.choice.rrcConnectionSetup_r8.radioResourceConfigDedicated.drb_ToAddModList = NULL;
+   rrcConnectionSetup->criticalExtensions.choice.c1.choice.rrcConnectionSetup_r8.radioResourceConfigDedicated.drb_ToReleaseList = NULL;
+   rrcConnectionSetup->criticalExtensions.choice.c1.choice.rrcConnectionSetup_r8.radioResourceConfigDedicated.sps_Config = NULL;
+@@ -3138,10 +3119,6 @@ do_RRCConnectionSetup(
+   mac_MainConfig->phr_Config->choice.setup.prohibitPHR_Timer = LTE_MAC_MainConfig__phr_Config__setup__prohibitPHR_Timer_sf20; // sf20 = 20 subframes // LTE_MAC_MainConfig__phr_Config__setup__prohibitPHR_Timer_sf1000
+   mac_MainConfig->phr_Config->choice.setup.dl_PathlossChange = LTE_MAC_MainConfig__phr_Config__setup__dl_PathlossChange_dB1;  // Value dB1 =1 dB, dB3 = 3 dB
+ 
+-  //if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
+-   // xer_fprint(stdout, &asn_DEF_LTE_DL_CCCH_Message, (void *)&dl_ccch_msg);
+-  //}
+-  //Zhehui
+   xer_fprint(stdout, &asn_DEF_LTE_DL_CCCH_Message, (void *)&dl_ccch_msg);
+ 
+   enc_rval = uper_encode_to_buffer(&asn_DEF_LTE_DL_CCCH_Message,
+@@ -3257,10 +3234,7 @@ uint8_t do_RRCConnectionSetup_BR(
+   *logicalchannelgroup=0;
+   SRB1_ul_SpecificParameters->logicalChannelGroup = logicalchannelgroup;
+ 
+-//Zhehui
+   ASN_SEQUENCE_ADD(&(*SRB_configList)->list,SRB1_config);
+-  //SRB1_config = NULL;
+-  //LOG_I(RRC,"Edited");
+   // PhysicalConfigDedicated
+ 
+   physicalConfigDedicated2 = CALLOC(1,sizeof(*physicalConfigDedicated2));
+@@ -3567,7 +3541,6 @@ uint8_t do_RRCConnectionSetup_BR(
+   // rrcConnectionSetup->criticalExtensions.choice.c1.choice.rrcConnectionSetup_r8.radioResourceConfigDedicated.mac_MainConfig = NULL;
+ 
+ #ifdef XER_PRINT
+-  //Zhehui
+   xer_fprint(stdout, &asn_DEF_LTE_DL_CCCH_Message, (void*)&dl_ccch_msg);
+ #endif
+   LOG_E(RRC, "Sending message");
+@@ -3592,7 +3565,6 @@ uint8_t do_RRCConnectionSetup_BR(
+       msg_p->ittiMsg.rrc_dl_ccch.size = message_string_size;
+       memcpy(&msg_p->ittiMsg.rrc_dl_ccch.text, message_string, message_string_size);
+ 
+-
+       itti_send_msg_to_task(TASK_UNKNOWN, ctxt_pP->instance, msg_p);
+     }
+   }
+@@ -3642,9 +3614,7 @@ uint8_t do_SecurityModeCommand(
+   dl_dcch_msg.message.choice.c1.choice.securityModeCommand.criticalExtensions.choice.c1.choice.securityModeCommand_r8.securityConfigSMC.securityAlgorithmConfig.integrityProtAlgorithm
+     = (e_LTE_SecurityAlgorithmConfig__integrityProtAlgorithm)integrityProtAlgorithm;
+ 
+-//  if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
+-    xer_fprint(stdout, &asn_DEF_LTE_DL_DCCH_Message, (void *)&dl_dcch_msg);
+-//  }
++  xer_fprint(stdout, &asn_DEF_LTE_DL_DCCH_Message, (void *)&dl_dcch_msg);
+ 
+   enc_rval = uper_encode_to_buffer(&asn_DEF_LTE_DL_DCCH_Message,
+                                    NULL,
+@@ -3696,9 +3666,7 @@ uint8_t do_UECapabilityEnquiry( const protocol_ctxt_t *const ctxt_pP,
+   ASN_SEQUENCE_ADD(&dl_dcch_msg.message.choice.c1.choice.ueCapabilityEnquiry.criticalExtensions.choice.c1.choice.ueCapabilityEnquiry_r8.ue_CapabilityRequest.list,
+ 		   &rat);
+ 
+-//  if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
+-    xer_fprint(stdout, &asn_DEF_LTE_DL_DCCH_Message, (void *)&dl_dcch_msg);
+-//  }
++  xer_fprint(stdout, &asn_DEF_LTE_DL_DCCH_Message, (void *)&dl_dcch_msg);
+ 
+   enc_rval = uper_encode_to_buffer(&asn_DEF_LTE_DL_DCCH_Message,
+                                    NULL,
+@@ -4057,9 +4025,7 @@ uint16_t do_RRCConnectionReconfiguration(const protocol_ctxt_t *const ctxt_pP,
+     return -1;
+   }
+ 
+-//  if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
+-    xer_fprint(stdout,&asn_DEF_LTE_DL_DCCH_Message,(void *)&dl_dcch_msg);
+-//  }
++  xer_fprint(stdout,&asn_DEF_LTE_DL_DCCH_Message,(void *)&dl_dcch_msg);
+ 
+   LOG_I(RRC,"RRCConnectionReconfiguration Encoded %zd bits (%zd bytes)\n",enc_rval.encoded,(enc_rval.encoded+7)/8);
+   // for (i=0;i<30;i++)
+@@ -4220,9 +4186,7 @@ do_RRCConnectionReestablishment(
+   ue_context_pP->ue_context.kenb_ncc = 0;
+   rrcConnectionReestablishment->criticalExtensions.choice.c1.choice.rrcConnectionReestablishment_r8.nonCriticalExtension = NULL;
+ 
+-//  if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
+-    xer_fprint(stdout, &asn_DEF_LTE_DL_CCCH_Message, (void *)&dl_ccch_msg);
+-//  }
++  xer_fprint(stdout, &asn_DEF_LTE_DL_CCCH_Message, (void *)&dl_ccch_msg);
+ 
+   enc_rval = uper_encode_to_buffer(&asn_DEF_LTE_DL_CCCH_Message,
+                                    NULL,
+@@ -4256,9 +4220,7 @@ uint8_t do_RRCConnectionReestablishmentReject(uint8_t                    Mod_id,
+   // RRCConnectionReestablishmentReject
+   rrcConnectionReestablishmentReject->criticalExtensions.present = LTE_RRCConnectionReestablishmentReject__criticalExtensions_PR_rrcConnectionReestablishmentReject_r8;
+ 
+-  //if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
+-    xer_fprint(stdout, &asn_DEF_LTE_DL_CCCH_Message, (void *)&dl_ccch_msg);
+-  //}
++  xer_fprint(stdout, &asn_DEF_LTE_DL_CCCH_Message, (void *)&dl_ccch_msg);
+ 
+   enc_rval = uper_encode_to_buffer(&asn_DEF_LTE_DL_CCCH_Message,
+                                    NULL,
+@@ -4295,9 +4257,7 @@ uint8_t do_RRCConnectionReject(uint8_t                    Mod_id,
+   /* let's put a wait time of 1s for the moment */
+   rrcConnectionReject->criticalExtensions.choice.c1.choice.rrcConnectionReject_r8.waitTime = 1;
+ 
+-  //if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
+-    xer_fprint(stdout, &asn_DEF_LTE_DL_CCCH_Message, (void *)&dl_ccch_msg);
+-  //}
++  xer_fprint(stdout, &asn_DEF_LTE_DL_CCCH_Message, (void *)&dl_ccch_msg);
+ 
+   enc_rval = uper_encode_to_buffer(&asn_DEF_LTE_DL_CCCH_Message,
+                                    NULL,
+diff --git a/openair2/RRC/LTE/rrc_eNB.c b/openair2/RRC/LTE/rrc_eNB.c
+index 7d4d10968..a7ed71c7e 100644
+--- a/openair2/RRC/LTE/rrc_eNB.c
++++ b/openair2/RRC/LTE/rrc_eNB.c
+@@ -98,8 +98,6 @@
+ 
+ #include "SIMULATION/TOOLS/sim.h" // for taus
+ 
+-//Zhehui
+-// #define DEBUG_RRC 1
+ #define RRC_DEFAULT_RAB_IS_AM
+ 
+ 
+@@ -1331,7 +1329,6 @@ rrc_eNB_generate_SecurityModeCommand(
+            rrc_eNB_get_next_transaction_identifier(ctxt_pP->module_id),
+            ue_context_pP->ue_context.ciphering_algorithm,
+            ue_context_pP->ue_context.integrity_algorithm);
+-  //Zhehui
+   LOG_MI("0xB0C2", "%x SecurityModeCommand %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+   LOG_DUMPMSG(RRC,DEBUG_RRC,(char *)buffer,size,"[MSG] RRC Security Mode Command\n");
+   LOG_I(RRC,
+@@ -1384,10 +1381,7 @@ rrc_eNB_generate_UECapabilityEnquiry(
+            ctxt_pP,
+            buffer,
+            rrc_eNB_get_next_transaction_identifier(ctxt_pP->module_id));
+-  //Zhehui
+-//Zhehui
+-          LOG_MI("0xB0C2", "%x UECapabilityEnquiry %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+-
++  LOG_MI("0xB0C2", "%x UECapabilityEnquiry %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+ 
+   LOG_I(RRC,
+         PROTOCOL_RRC_CTXT_UE_FMT" Logical Channel DL-DCCH, Generate UECapabilityEnquiry (bytes %d)\n",
+@@ -1449,7 +1443,6 @@ rrc_eNB_generate_RRCConnectionReject(
+     MSC_AS_TIME_ARGS(ctxt_pP),
+     ue_context_pP == NULL ? -1 : ue_context_pP->ue_context.rnti,
+     ue_p->Srb0.Tx_buffer.payload_size);
+-    //Zhehui
+   LOG_MI("0xB0C2", "%x RRCConnectionReject %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+   LOG_I(RRC,
+         PROTOCOL_RRC_CTXT_UE_FMT" [RAPROC] Logical Channel DL-CCCH, Generating LTE_RRCConnectionReject (bytes %d)\n",
+@@ -2140,7 +2133,6 @@ rrc_eNB_process_RRCConnectionReestablishmentComplete(
+       ue_context_pP->ue_context.e_rab[i].param.nas_pdu.buffer = NULL;
+     }
+   }
+-  //Zhehui
+   LOG_MI("0xB0C2", "%x RRCConnectionReconfiguration %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+ 
+   if(size==65535) {
+@@ -2261,7 +2253,6 @@ rrc_eNB_generate_RRCConnectionReestablishmentReject(
+     MSC_AS_TIME_ARGS(ctxt_pP),
+     ue_context_pP == NULL ? -1 : ue_context_pP->ue_context.rnti,
+     ue_p->Srb0.Tx_buffer.payload_size);
+-//Zhehui
+   LOG_MI("0xB0C2", "%x RRCConnectionReestablishmentReject %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+   LOG_I(RRC,
+         PROTOCOL_RRC_CTXT_UE_FMT" [RAPROC] Logical Channel DL-CCCH, Generating LTE_RRCConnectionReestablishmentReject (bytes %d)\n",
+@@ -2310,7 +2301,6 @@ rrc_eNB_generate_RRCConnectionRelease(
+     ue_context_pP->ue_context.rnti,
+     rrc_eNB_mui,
+     size);
+-  //Zhehui
+   LOG_MI("0xB0C2", "%x RRCConnectionRelease %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+   while (pthread_mutex_trylock(&rrc_release_freelist)) {
+     /* spin... */
+@@ -2389,10 +2379,8 @@ rrc_eNB_generate_dedicatedRRCConnectionReconfiguration(const protocol_ctxt_t *co
+   //  int drb_identity_index=0;
+   uint8_t xid = rrc_eNB_get_next_transaction_identifier(ctxt_pP->module_id);   //Transaction_id,
+   DRB_configList2=&ue_context_pP->ue_context.DRB_configList2[xid];
+-//Zhehui
+   LOG_MI("0xB0C2", "%x RRCConnectionReconfiguration %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+ 
+-
+   if (*DRB_configList2) {
+     free(*DRB_configList2);
+   }
+@@ -3074,10 +3062,8 @@ void rrc_eNB_generate_defaultRRCConnectionReconfiguration(const protocol_ctxt_t
+     T_INT(ctxt_pP->frame),
+     T_INT(ctxt_pP->subframe), 
+     T_INT(ctxt_pP->rnti));
+-//Zhehui
+   LOG_MI("0xB0C2", "%x RRCConnectionReconfiguration %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+ 
+-
+   /* Configure SRB2 */
+   SRB_configList2 = &(ue_context_pP->ue_context.SRB_configList2[xid]);
+ 
+@@ -6876,7 +6862,6 @@ rrc_eNB_generate_RRCConnectionSetup(
+                             SRB_configList,
+                             &ue_context_pP->ue_context.physicalConfigDedicated);
+   }
+-  //Zhehui
+   LOG_MI("0xB0C2", "%x RRCConnectionSetup %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+   LOG_DUMPMSG(RRC,DEBUG_RRC,
+               (char *)(ue_p->Srb0.Tx_buffer.Payload),
+@@ -6996,10 +6981,6 @@ rrc_eNB_generate_RRCConnectionSetup(
+     ue_context_pP->ue_context.rnti,
+     ue_p->Srb0.Tx_buffer.payload_size);
+ 
+-//Zhehui
+-//	    LOG_E(RRC, "MI: Composing RRCConnectionSetup for UE\n");
+-
+-
+ 
+   LOG_I(RRC,
+         PROTOCOL_RRC_CTXT_UE_FMT" [RAPROC] Logical Channel DL-CCCH, Generating RRCConnectionSetup (bytes %d)\n",
+@@ -7209,8 +7190,7 @@ rrc_eNB_decode_ccch(
+     return -1;
+   }
+ 
+-  //Zhehui
+-        xer_fprint(stdout, &asn_DEF_LTE_UL_CCCH_Message, (void *)ul_ccch_msg);
++  xer_fprint(stdout, &asn_DEF_LTE_UL_CCCH_Message, (void *)ul_ccch_msg);
+ 
+   if (ul_ccch_msg->message.present == LTE_UL_CCCH_MessageType_PR_c1) {
+     switch (ul_ccch_msg->message.choice.c1.present) {
+@@ -7225,7 +7205,6 @@ rrc_eNB_decode_ccch(
+           T_INT(ctxt_pP->subframe), T_INT(ctxt_pP->rnti));
+         LOG_DUMPMSG(RRC,DEBUG_RRC,(char *)(buffer), buffer_length,
+                     "[MSG] RRC Connection Reestablishment Request\n");
+-	//Zhehui
+ 	LOG_MI("0xB0C2", "%x RRCConnectionReestablishment %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+         LOG_D(RRC,
+               PROTOCOL_RRC_CTXT_UE_FMT"MAC_eNB--- MAC_DATA_IND (rrcConnectionReestablishmentRequest on SRB0) --> RRC_eNB\n",
+@@ -7451,18 +7430,13 @@ rrc_eNB_decode_ccch(
+              LOG_DUMPMSG(RRC,DEBUG_RRC,(char *)buffer,
+                   buffer_length,
+                     "[MSG] RRC Connection Request\n");
+-	// LOG_E(RRC, (char *)buffer);
+         LOG_D(RRC,
+               PROTOCOL_RRC_CTXT_UE_FMT"MAC_eNB --- MAC_DATA_IND  (rrcConnectionRequest on SRB0) --> RRC_eNB\n",
+               PROTOCOL_RRC_CTXT_UE_ARGS(ctxt_pP));
+         ue_context_p = rrc_eNB_get_ue_context(
+                          RC.rrc[ctxt_pP->module_id],
+                          ctxt_pP->rnti);
+-//Zhehui
+-        //xer_fprint(stdout, &asn_DEF_LTE_UL_CCCH_Message, (void *)ul_ccch_msg);
+-	//LOG_E(RRC, "MI: RRCConnectionRequest from UE %x", ue_context_p->ue_context.rnti);
+ 	
+- 
+         if (ue_context_p != NULL) {
+           // erase content
+           rrc_eNB_free_mem_UE_context(ctxt_pP, ue_context_p);
+@@ -7515,7 +7489,6 @@ rrc_eNB_decode_ccch(
+               random_value = (((uint64_t)mme_code) << 32) | m_tmsi;
+ 
+               if ((ue_context_p = rrc_eNB_ue_context_stmsi_exist(ctxt_pP, mme_code, m_tmsi))) {
+-                //Zhehui
+ 		      LOG_E(RRC,"MI: RRC Connection Request from UE with old rnti %x => %x\n", ue_context_p->ue_context.rnti,ctxt_pP->rnti);
+ 
+ 		      LOG_D(RRC,"MI: S-TMSI exists, ue_context_p %p, old rnti %x => %x\n",ue_context_p,ue_context_p->ue_context.rnti,ctxt_pP->rnti);
+@@ -7549,7 +7522,6 @@ rrc_eNB_decode_ccch(
+                 ue_context_p->ue_context.ue_release_timer_rrc = 0;
+                 ue_context_p->ue_context.reestablishment_xid = -1;
+               } else {
+-		//Zhehui
+                 LOG_MI("0xB0C2", "0000 RRCConnectionSetupRequest\n");
+                 LOG_I(RRC," S-TMSI doesn't exist, setting Initialue_identity_s_TMSI.m_tmsi to %p => %x\n",ue_context_p,m_tmsi);
+                 //              ue_context_p = rrc_eNB_get_next_free_ue_context(ctxt_pP, NOT_A_RANDOM_UE_IDENTITY);
+@@ -7600,36 +7572,21 @@ rrc_eNB_decode_ccch(
+             ue_context_p->ue_context.reestablishment_cause = LTE_ReestablishmentCause_spare1;
+ 
+             if (stmsi_received==0) {
+-//Zhehui
+-		    //LOG_E(RRC, "MI: Accept new connection from UE random UE identity (0x%" PRIx64 ") MME code %u TMSI %u cause %ld\n",
+-	//			    PROTOCOL_RRC_CTXT_UE_ARGS(ctxt_pP),
+-          //          ue_context_p->ue_context.random_ue_identity,
+-            //        ue_context_p->ue_context.Initialue_identity_s_TMSI.mme_code,
+-              //      ue_context_p->ue_context.Initialue_identity_s_TMSI.m_tmsi,
+-                //    ue_context_p->ue_context.establishment_cause);
+-		    LOG_I(RRC, PROTOCOL_RRC_CTXT_UE_FMT" Accept new connection from UE random UE identity (0x%" PRIx64 ") MME code %u TMSI %u cause %ld\n",
++	      LOG_I(RRC, PROTOCOL_RRC_CTXT_UE_FMT" Accept new connection from UE random UE identity (0x%" PRIx64 ") MME code %u TMSI %u cause %ld\n",
+                     PROTOCOL_RRC_CTXT_UE_ARGS(ctxt_pP),
+                     ue_context_p->ue_context.random_ue_identity,
+                     ue_context_p->ue_context.Initialue_identity_s_TMSI.mme_code,
+                     ue_context_p->ue_context.Initialue_identity_s_TMSI.m_tmsi,
+                     ue_context_p->ue_context.establishment_cause);
+ 	    } else {
+-            //Zhehui
+-	    // LOG_E(RRC, "MI: Accept new connection from UE  MME code %u TMSI %u cause %ld\n",
+-            //        PROTOCOL_RRC_CTXT_UE_ARGS(ctxt_pP),
+-            //        ue_context_p->ue_context.Initialue_identity_s_TMSI.mme_code,
+-            //        ue_context_p->ue_context.Initialue_identity_s_TMSI.m_tmsi,
+-            //        ue_context_p->ue_context.establishment_cause);
+-
+-
+-	    LOG_I(RRC, PROTOCOL_RRC_CTXT_UE_FMT" Accept new connection from UE  MME code %u TMSI %u cause %ld\n",
++	      LOG_I(RRC, PROTOCOL_RRC_CTXT_UE_FMT" Accept new connection from UE  MME code %u TMSI %u cause %ld\n",
+                     PROTOCOL_RRC_CTXT_UE_ARGS(ctxt_pP),
+                     ue_context_p->ue_context.Initialue_identity_s_TMSI.mme_code,
+                     ue_context_p->ue_context.Initialue_identity_s_TMSI.m_tmsi,
+                     ue_context_p->ue_context.establishment_cause);
+ 
+-            if (stmsi_received == 0)
+-              RC.rrc[ctxt_pP->module_id]->Nb_ue++;
++              if (stmsi_received == 0)
++                RC.rrc[ctxt_pP->module_id]->Nb_ue++;
+ 	    }
+ 	    } else {
+             // no context available
+@@ -7682,8 +7639,6 @@ rrc_eNB_decode_ccch(
+                &DCCH_LCHAN_DESC,
+                LCHAN_DESC_SIZE);
+         rrc_eNB_generate_RRCConnectionSetup(ctxt_pP, ue_context_p, CC_id);
+-         //Zhehui
+-	    //LOG_E(RRC, "MI: Initializating Signal Radio Bearer 1 for UE %x %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+ 
+  LOG_I(RRC, PROTOCOL_RRC_CTXT_UE_FMT"CALLING RLC CONFIG SRB1 (rbid %d)\n",
+               PROTOCOL_RRC_CTXT_UE_ARGS(ctxt_pP),
+@@ -7802,7 +7757,6 @@ rrc_eNB_decode_dcch(
+                    ctxt_pP->rnti);
+ 
+   if (ul_dcch_msg->message.present == LTE_UL_DCCH_MessageType_PR_c1) {
+-//Zhehui
+     //TODO
+     printf("[MI] 0xB0C1\n");
+     xer_fprint(stdout, &asn_DEF_LTE_UL_DCCH_Message, (void *)ul_dcch_msg);
+@@ -7842,7 +7796,6 @@ rrc_eNB_decode_dcch(
+           LOG_I(RRC, "Processing LTE_RRCConnectionReconfigurationComplete UE %x, ue_context_p is NULL %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+           break;
+         }
+-//Zhehui
+           LOG_MI("0xB0C2", "%x RRCConnectionReconfigurationComplete %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+ 
+         LOG_DUMPMSG(RRC,DEBUG_RRC,(char *)(Rx_sdu),sdu_sizeP,
+@@ -8034,7 +7987,6 @@ rrc_eNB_decode_dcch(
+           T_INT(ctxt_pP->subframe), T_INT(ctxt_pP->rnti));
+         LOG_DUMPMSG(RRC,DEBUG_RRC,(char *)Rx_sdu,sdu_sizeP,
+                     "[MSG] RRC Connection Reestablishment Complete\n");
+-      //Zhehui
+           LOG_MI("0xB0C2", "%x RRCConnectionReconfigurationComplete %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+ 
+   MSC_LOG_RX_MESSAGE(
+@@ -8120,7 +8072,6 @@ rrc_eNB_decode_dcch(
+           break;
+         }
+ 
+-	//Zhehui
+ 	LOG_MI("0xB0C2", "%x RRCConnectionSetupComplete %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+ 
+         LOG_DUMPMSG(RRC,DEBUG_RRC,(char *)Rx_sdu,sdu_sizeP,
+@@ -8176,9 +8127,7 @@ rrc_eNB_decode_dcch(
+           LOG_I(RRC, "Processing securityModeComplete UE %x, ue_context_p is NULL %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+           break;
+         }
+-//Zhehui
+-          LOG_MI("0xB0C2", "%x SecurityModeComplete %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+-
++        LOG_MI("0xB0C2", "%x SecurityModeComplete %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+ 
+         LOG_DUMPMSG(RRC,DEBUG_RRC,(char *)Rx_sdu,sdu_sizeP,
+                     "[MSG] RRC Security Mode Complete\n");
+@@ -8238,7 +8187,6 @@ rrc_eNB_decode_dcch(
+         if ( LOG_DEBUGFLAG(DEBUG_ASN1) ) {
+           xer_fprint(stdout, &asn_DEF_LTE_UL_DCCH_Message, (void *)ul_dcch_msg);
+         }
+-  //Zhehui
+   LOG_MI("0xB0C2", "%x SecurityModeFailure %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+         // cancel the security mode in PDCP
+         // followup with the remaining procedure
+@@ -8255,10 +8203,8 @@ rrc_eNB_decode_dcch(
+           LOG_I(RRC, "Processing ueCapabilityInformation UE %x, ue_context_p is NULL %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+           break;
+         }
+-//Zhehui
+         LOG_MI("0xB0C2", "%x UECapabilityInformation %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+ 
+-
+         LOG_DUMPMSG(RRC,DEBUG_RRC,(char *)Rx_sdu,sdu_sizeP,
+                     "[MSG] RRC UECapablility Information\n");
+         MSC_LOG_RX_MESSAGE(
+@@ -8355,10 +8301,8 @@ rrc_eNB_decode_dcch(
+           LOG_I(RRC, "Processing ulInformationTransfer UE %x, ue_context_p is NULL %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+           break;
+         }
+-//Zhehui
+         LOG_MI("0xB0C2", "%x ULInformationTransfer %d %d\n", ctxt_pP->rnti, ctxt_pP->frame, ctxt_pP->subframe);
+ 
+-
+         LOG_D(RRC,"[MSG] RRC UL Information Transfer \n");
+         LOG_DUMPMSG(RRC,DEBUG_RRC,(char *)Rx_sdu,sdu_sizeP,
+                     "[MSG] RRC UL Information Transfer \n");
+-- 
+2.24.3 (Apple Git-128)
+
