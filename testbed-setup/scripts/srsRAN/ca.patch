@@ -1,0 +1,491 @@
+diff --git a/lib/include/srslte/interfaces/enb_interfaces.h b/lib/include/srslte/interfaces/enb_interfaces.h
+index 5a1193e1a..223a13a61 100644
+--- a/lib/include/srslte/interfaces/enb_interfaces.h
++++ b/lib/include/srslte/interfaces/enb_interfaces.h
+@@ -532,6 +532,9 @@ typedef struct {
+   uint32_t                      nof_prb; ///< Needed to dimension MAC softbuffers for all cells
+   sched_interface::sched_args_t sched;
+   int                           link_failure_nof_err;
++  // ca-conf
++  std::string                   scell_act_policy; 
++  uint32_t                      scell_act_rbs;
+ } mac_args_t;
+ 
+ class stack_interface_s1ap_lte
+diff --git a/lib/include/srslte/interfaces/sched_interface.h b/lib/include/srslte/interfaces/sched_interface.h
+index 9efb67b83..79e27d2b0 100644
+--- a/lib/include/srslte/interfaces/sched_interface.h
++++ b/lib/include/srslte/interfaces/sched_interface.h
+@@ -298,6 +298,10 @@ public:
+   /* Custom */
+   virtual void                                 set_dl_tti_mask(uint8_t* tti_mask, uint32_t nof_sfs) = 0;
+   virtual std::array<int, SRSLTE_MAX_CARRIERS> get_enb_ue_cc_map(uint16_t rnti)                     = 0;
++  // scell act/deact
++  virtual void deactivate_scell(uint16_t rnti) = 0;
++  virtual void activate_scell(uint16_t rnti) = 0;
++  virtual uint32_t get_scell_cc_idx(uint16_t rnti, bool & is_active) = 0;
+ };
+ 
+ } // namespace srsenb
+diff --git a/lib/src/mac/pdu.cc b/lib/src/mac/pdu.cc
+index 121413a59..42c926aab 100644
+--- a/lib/src/mac/pdu.cc
++++ b/lib/src/mac/pdu.cc
+@@ -770,6 +770,7 @@ bool sch_subh::set_scell_activation_cmd(const std::array<bool, SRSLTE_MAX_CARRIE
+   for (uint8_t i = 1; i < SRSLTE_MAX_CARRIERS; ++i) {
+     w_payload_ce[0] |= (static_cast<uint8_t>(active_scell_idxs[i]) << i);
+   }
++  printf("[ca-debug] w_payload_ce=%d,size=%lu\n",unsigned(w_payload_ce[0]),active_scell_idxs.size()-1);
+   lcid = (uint32_t)dl_sch_lcid::SCELL_ACTIVATION;
+   ((sch_pdu*)parent)->update_space_ce(nof_octets);
+   nof_bytes = nof_octets;
+diff --git a/srsenb/hdr/stack/mac/mac.h b/srsenb/hdr/stack/mac/mac.h
+index 6bf523a65..19ddbb6f8 100644
+--- a/srsenb/hdr/stack/mac/mac.h
++++ b/srsenb/hdr/stack/mac/mac.h
+@@ -35,6 +35,7 @@
+ #include "ta.h"
+ #include "ue.h"
+ #include <vector>
++#include <ctime>
+ 
+ namespace srsenb {
+ 
+@@ -96,6 +97,7 @@ public:
+   int rlc_buffer_state(uint16_t rnti, uint32_t lc_id, uint32_t tx_queue, uint32_t retx_queue) override;
+ 
+   bool process_pdus();
++  void update_scell_state_rbs(uint16_t rnti, uint32_t tx_queue); //ca-conf
+ 
+   void get_metrics(mac_metrics_t metrics[ENB_METRICS_MAX_USERS]);
+   void
+@@ -131,6 +133,9 @@ private:
+   /* Scheduler unit */
+   sched                                    scheduler;
+   std::vector<sched_interface::cell_cfg_t> cell_config;
++  // ca-deact
++  std::map<uint16_t, time_t> scell_act_time;
++  std::map<uint16_t, time_t> scell_deact_time;
+ 
+   sched_interface::dl_pdu_mch_t mch = {};
+ 
+diff --git a/srsenb/hdr/stack/mac/scheduler.h b/srsenb/hdr/stack/mac/scheduler.h
+index 36761162f..51e0cf56e 100644
+--- a/srsenb/hdr/stack/mac/scheduler.h
++++ b/srsenb/hdr/stack/mac/scheduler.h
+@@ -135,6 +135,11 @@ public:
+   void                                 tpc_dec(uint16_t rnti);
+   std::array<int, SRSLTE_MAX_CARRIERS> get_enb_ue_cc_map(uint16_t rnti) final;
+ 
++  // ca-deact
++  void deactivate_scell(uint16_t rnti) final;
++  void activate_scell(uint16_t rnti) final;
++  uint32_t get_scell_cc_idx(uint16_t rnti, bool& is_active) final;
++
+   class carrier_sched;
+ 
+ protected:
+diff --git a/srsenb/hdr/stack/mac/scheduler_ue.h b/srsenb/hdr/stack/mac/scheduler_ue.h
+index 3f6903148..c10c5ddbb 100644
+--- a/srsenb/hdr/stack/mac/scheduler_ue.h
++++ b/srsenb/hdr/stack/mac/scheduler_ue.h
+@@ -52,7 +52,7 @@ struct sched_ue_carrier {
+   const sched_cell_params_t* get_cell_cfg() const { return cell_params; }
+   bool                       is_active() const { return active; }
+   void                       set_dl_cqi(uint32_t tti_tx_dl, uint32_t dl_cqi);
+-
++  void                       set_active(bool value) { active = value; } //ca-deact
+   harq_entity harq_ent;
+ 
+   uint32_t dl_ri      = 0;
+@@ -121,10 +121,14 @@ public:
+ 
+   void tpc_inc();
+   void tpc_dec();
+-
++  // ca-deact
++  void ue_deactivate_scell();
++  void ue_activate_scell();
++ 
+   const dl_harq_proc&              get_dl_harq(uint32_t idx, uint32_t cc_idx) const;
+   uint16_t                         get_rnti() const { return rnti; }
+   std::pair<bool, uint32_t>        get_cell_index(uint32_t enb_cc_idx) const;
++  std::pair<bool, uint32_t>        get_scell_cc_idx() const; //ca-deact
+   const sched_interface::ue_cfg_t& get_ue_cfg() const { return cfg; }
+   uint32_t                         get_aggr_level(uint32_t ue_cc_idx, uint32_t nof_bits);
+ 
+diff --git a/srsenb/src/main.cc b/srsenb/src/main.cc
+index f17f942b8..c06cd65c2 100644
+--- a/srsenb/src/main.cc
++++ b/srsenb/src/main.cc
+@@ -191,6 +191,12 @@ void parse_args(all_args_t* args, int argc, char* argv[])
+     ("expert.eea_pref_list", bpo::value<string>(&args->general.eea_pref_list)->default_value("EEA0, EEA2, EEA1"), "Ordered preference list for the selection of encryption algorithm (EEA) (default: EEA0, EEA2, EEA1).")
+     ("expert.eia_pref_list", bpo::value<string>(&args->general.eia_pref_list)->default_value("EIA2, EIA1, EIA0"), "Ordered preference list for the selection of integrity algorithm (EIA) (default: EIA2, EIA1, EIA0).")
+ 
++    // ca-conf
++    ("flora.scell_act_policy", bpo::value<string>(&args->stack.mac.scell_act_policy)->default_value("null"), "Criterion for scell activation/de-activation (Options: rbs (RLC buffer size), null.") 
++    ("flora.scell_act_rbs", bpo::value<uint32_t>(&args->stack.mac.scell_act_rbs)->default_value(10), "Threshold of RLC buffer size to activate/deactivate SCell, in KB.") 
++    // ("flora.scell_deact_policy", bpo::value<string>(&args->stack.mac.scell_deact_policy)->default_value("null"), "Criterion for scell deactivation (E.g. rbs (RLC buffer size), cqi, null; default: null).") 
++    // ("flora.scell_deact_rbs", bpo::value<uint32_t>(&args->stack.mac.scell_deact_rbs)->default_value(8), "Threshold of RLC buffer size to deactivate SCell, in KB.") 
++
+     // eMBMS section
+     ("embms.enable", bpo::value<bool>(&args->stack.embms.enable)->default_value(false), "Enables MBMS in the eNB")
+     ("embms.m1u_multiaddr", bpo::value<string>(&args->stack.embms.m1u_multiaddr)->default_value("239.255.0.1"), "M1-U Multicast address the eNB joins.")
+diff --git a/srsenb/src/phy/cc_worker.cc b/srsenb/src/phy/cc_worker.cc
+index 74fa81cfc..2a8e26fd5 100644
+--- a/srsenb/src/phy/cc_worker.cc
++++ b/srsenb/src/phy/cc_worker.cc
+@@ -183,12 +183,12 @@ void cc_worker::set_tti(uint32_t tti_)
+ int cc_worker::add_rnti(uint16_t rnti, bool is_pcell, bool is_temporal)
+ {
+ 
+-  if (not is_temporal) {
++  if (not is_temporal && is_pcell) {
+     if (srslte_enb_dl_add_rnti(&enb_dl, rnti)) {
+       return -1;
+     }
+     if (srslte_enb_ul_add_rnti(&enb_ul, rnti)) {
+-      return -1;
++        return -1;
+     }
+   }
+ 
+diff --git a/srsenb/src/phy/phy_ue_db.cc b/srsenb/src/phy/phy_ue_db.cc
+index cfaaae7c4..3d2c1ac53 100644
+--- a/srsenb/src/phy/phy_ue_db.cc
++++ b/srsenb/src/phy/phy_ue_db.cc
+@@ -303,6 +303,7 @@ void phy_ue_db::addmod_rnti(uint16_t
+       // Set Cell state, all inactive by default except PCell
+       if (cell_info.state != cell_state_primary) {
+         cell_info.state = cell_state_secondary_inactive;
++        printf("[ca-debug]phy_ue_db.cc:addmod_rnti, set SCell inactive; rnti=0x%x, ue_cc_idx=%u, enb_cc_idx=%u\n", rnti, ue_cc_idx, cell_info.enb_cc_idx);
+       }
+ 
+       // Count Serving cell
+diff --git a/srsenb/src/stack/mac/mac.cc b/srsenb/src/stack/mac/mac.cc
+index 6846883d8..4ae8d0787 100644
+--- a/srsenb/src/stack/mac/mac.cc
++++ b/srsenb/src/stack/mac/mac.cc
+@@ -24,6 +24,7 @@
+ #include <string.h>
+ #include <strings.h>
+ #include <unistd.h>
++#include <ctime>
+ 
+ #include "srsenb/hdr/stack/mac/mac.h"
+ #include "srslte/common/log.h"
+@@ -69,6 +70,7 @@ bool mac::init(const mac_args_t&        args_,
+     log_h = log_h_;
+ 
+     args  = args_;
++//    printf("[ca-debug] scell_act_policy=%s, scell_act_rbs=%uK\n.", args.scell_act_policy.c_str(), args.scell_act_rbs);
+     cells = cells_;
+ 
+     stack_task_queue = stack->make_task_queue();
+@@ -146,6 +148,8 @@ int mac::rlc_buffer_state(uint16_t rnti, uint32_t lc_id, uint32_t tx_queue, uint
+   int                       ret = -1;
+   if (ue_db.count(rnti)) {
+     if (rnti != SRSLTE_MRNTI) {
++      if (args.scell_act_policy == "rbs")
++        update_scell_state_rbs(rnti, tx_queue);
+       ret = scheduler.dl_rlc_buffer_state(rnti, lc_id, tx_queue, retx_queue);
+     } else {
+       for (uint32_t i = 0; i < mch.num_mtch_sched; i++) {
+@@ -893,6 +897,12 @@ bool mac::process_pdus()
+   return ret;
+ }
+ 
++//ca-conf
++void mac::update_scell_state_rbs(uint16_t rnti, uint32_t tx_queue)
++{
++  // todo
++}
++
+ void mac::write_mcch(sib_type2_s* sib2_, sib_type13_r9_s* sib13_, mcch_msg_s* mcch_)
+ {
+   mcch               = *mcch_;
+diff --git a/srsenb/src/stack/mac/scheduler.cc b/srsenb/src/stack/mac/scheduler.cc
+index 1be227f4a..65297f55a 100644
+--- a/srsenb/src/stack/mac/scheduler.cc
++++ b/srsenb/src/stack/mac/scheduler.cc
+@@ -196,6 +196,38 @@ int sched::cell_cfg(const std::vector<sched_interface::cell_cfg_t>& cell_cfg)
+   return 0;
+ }
+ 
++//ca-deact
++void sched::deactivate_scell(uint16_t rnti)
++{
++  std::lock_guard<std::mutex> lock(sched_mutex);
++  auto it = ue_db.find(rnti);
++  if (it != ue_db.end()) {
++    printf("[ca-debug] sched::deactivate_scell rnti=0x%x\n", rnti);
++    it->second.ue_deactivate_scell();
++  }
++}
++
++void sched::activate_scell(uint16_t rnti)
++{
++  std::lock_guard<std::mutex> lock(sched_mutex);
++  auto it = ue_db.find(rnti);
++  if (it != ue_db.end()) {
++    it->second.ue_activate_scell();
++  }
++}
++
++uint32_t sched::get_scell_cc_idx(uint16_t rnti, bool& is_active)
++{
++  auto it = ue_db.find(rnti);
++  is_active = false;
++  if (it != ue_db.end()) {
++    auto p = it->second.get_scell_cc_idx();
++    is_active = p.first;
++    return p.second;
++  }
++  return -1;
++}
++
+ /*******************************************************
+  *
+  * FAPI-like main sched interface. Wrappers to UE object
+diff --git a/srsenb/src/stack/mac/scheduler_carrier.cc b/srsenb/src/stack/mac/scheduler_carrier.cc
+index f1c872284..5829a9cb2 100644
+--- a/srsenb/src/stack/mac/scheduler_carrier.cc
++++ b/srsenb/src/stack/mac/scheduler_carrier.cc
+@@ -322,10 +322,20 @@ const sf_sched_result& sched::carrier_sched::generate_tti_result(uint32_t tti_rx
+ 
+     bool dl_active = sf_dl_mask[tti_sched->get_tti_tx_dl() % sf_dl_mask.size()] == 0;
+ 
++    //bool is_scell = false;
++    //for (auto& ue_pair : *ue_db) {
++    //	if (ue_pair.second.get_cell_index(enb_cc_idx).second > 0) {
++    //	    is_scell = true;
++    //	    // log_h->info("[ca-debug] rnti=0x%x, cc_idx=%d is SCell\n", &ue_pair.first, enb_cc_idx)
++    //	    break;
++    //	}
++    //}
++    //if (!is_scell) {
+     /* Schedule PHICH */
+     for (auto& ue_pair : *ue_db) {
+       tti_sched->alloc_phich(&ue_pair.second, &sf_result->ul_sched_result);
+     }
++    //}
+ 
+     /* Schedule DL control data */
+     if (dl_active) {
+@@ -342,6 +352,7 @@ const sf_sched_result& sched::carrier_sched::generate_tti_result(uint32_t tti_rx
+ 
+     /* Prioritize PDCCH scheduling for DL and UL data in a RoundRobin fashion */
+     if ((tti_rx % 2) == 0) {
++      //if (!is_scell)
+       alloc_ul_users(tti_sched);
+     }
+ 
+@@ -349,6 +360,7 @@ const sf_sched_result& sched::carrier_sched::generate_tti_result(uint32_t tti_rx
+     alloc_dl_users(tti_sched);
+ 
+     if ((tti_rx % 2) == 1) {
++      //if (!is_scell)
+       alloc_ul_users(tti_sched);
+     }
+ 
+diff --git a/srsenb/src/stack/mac/scheduler_grid.cc b/srsenb/src/stack/mac/scheduler_grid.cc
+index 7a995a01d..a79b8688b 100644
+--- a/srsenb/src/stack/mac/scheduler_grid.cc
++++ b/srsenb/src/stack/mac/scheduler_grid.cc
+@@ -722,7 +722,7 @@ bool sf_sched::alloc_phich(sched_ue* user, sched_interface::ul_sched_res_t* ul_s
+   auto& phich_list = ul_sf_result->phich[ul_sf_result->nof_phich_elems];
+ 
+   auto p = user->get_cell_index(cc_cfg->enb_cc_idx);
+-  if (not p.first) {
++  if (not p.first || p.second != 0) {
+     // user does not support this carrier
+     return false;
+   }
+diff --git a/srsenb/src/stack/mac/scheduler_metric.cc b/srsenb/src/stack/mac/scheduler_metric.cc
+index 3184d5edf..74b340919 100644
+--- a/srsenb/src/stack/mac/scheduler_metric.cc
++++ b/srsenb/src/stack/mac/scheduler_metric.cc
+@@ -240,7 +240,7 @@ ul_harq_proc* ul_metric_rr::allocate_user_retx_prbs(sched_ue* user)
+     return nullptr;
+   }
+   auto p = user->get_cell_index(cc_cfg->enb_cc_idx);
+-  if (not p.first) {
++  if (not p.first || p.second != 0) {
+     // this cc is not activated for this user
+     return nullptr;
+   }
+@@ -282,7 +282,7 @@ ul_harq_proc* ul_metric_rr::allocate_user_newtx_prbs(sched_ue* user)
+     return nullptr;
+   }
+   auto p = user->get_cell_index(cc_cfg->enb_cc_idx);
+-  if (not p.first) {
++  if (not p.first || p.second != 0) {
+     // this cc is not activated for this user
+     return nullptr;
+   }
+diff --git a/srsenb/src/stack/mac/scheduler_ue.cc b/srsenb/src/stack/mac/scheduler_ue.cc
+index b2a25f87b..f0b381bd8 100644
+--- a/srsenb/src/stack/mac/scheduler_ue.cc
++++ b/srsenb/src/stack/mac/scheduler_ue.cc
+@@ -170,6 +170,52 @@ void sched_ue::reset()
+   }
+ }
+ 
++// ca-deact
++void sched_ue::ue_deactivate_scell()
++{
++  bool is_changed = false;
++  if (cfg.supported_cc_list.size() > 1) {
++    if (cfg.supported_cc_list[1].active) {
++      printf("[ca-debug] sched_ue::ue_deactivate_scell cc_idx=%d\n", cfg.supported_cc_list[1].enb_cc_idx);
++      cfg.supported_cc_list[1].active = false;
++      is_changed = true;
++    }
++  }
++  if (carriers.size() > 1) {
++    if (carriers[1].is_active()) {
++      printf("[ca-debug] sched_ue::ue_deactivate_scell, carriers\n");
++      carriers[1].set_active(false);
++      is_changed = true;
++    }
++  }
++
++  if (is_changed) {
++    pending_ces.emplace_back(srslte::dl_sch_lcid::SCELL_ACTIVATION);
++    printf("[ca-debug] sched_ue::ue_deactivate_scell, enqueue Scell deactivation\n");
++  }
++}
++
++void sched_ue::ue_activate_scell()
++{
++    bool is_changed = false;
++  if (cfg.supported_cc_list.size() > 1) {
++    if (!cfg.supported_cc_list[1].active) {
++      cfg.supported_cc_list[1].active = true;
++      is_changed = true;
++    }
++  }
++  if (carriers.size() > 1) {
++    if (!carriers[1].is_active()) {
++      carriers[1].set_active(true);
++      is_changed = true;
++    }
++  }
++
++  if (is_changed) {
++    pending_ces.emplace_back(srslte::dl_sch_lcid::SCELL_ACTIVATION);
++  }
++}
++
+ /*******************************************************
+  *
+  * FAPI-like main scheduler interface.
+@@ -1073,6 +1119,15 @@ std::pair<bool, uint32_t> sched_ue::get_cell_index(uint32_t enb_cc_idx) const
+   return {false, std::numeric_limits<uint32_t>::max()};
+ }
+ 
++// ca-deact
++std::pair<bool, uint32_t> sched_ue::get_scell_cc_idx() const
++{
++  if (cfg.supported_cc_list.size() < 2)
++    return {false, std::numeric_limits<uint32_t>::max()};
++  // printf("[ca-debug] SCell, active=%d, enb_cc_idx=%u\n", cfg.supported_cc_list[1].active, cfg.supported_cc_list[1].enb_cc_idx);
++  return {cfg.supported_cc_list[1].active, cfg.supported_cc_list[1].enb_cc_idx};
++}
++
+ uint32_t sched_ue::get_aggr_level(uint32_t ue_cc_idx, uint32_t nof_bits)
+ {
+   return carriers[ue_cc_idx].get_aggr_level(nof_bits);
+diff --git a/srsenb/src/stack/mac/ue.cc b/srsenb/src/stack/mac/ue.cc
+index eb6c6879c..6152ed4ed 100644
+--- a/srsenb/src/stack/mac/ue.cc
++++ b/srsenb/src/stack/mac/ue.cc
+@@ -119,6 +119,8 @@ void ue::reset()
+  */
+ uint32_t ue::allocate_cc_buffers(const uint32_t num_cc)
+ {
++  if (softbuffer_tx.size() >= 2) 
++	  return softbuffer_tx.size();
+   for (uint32_t i = 0; i < num_cc; ++i) {
+     // create and init Rx buffers for Pcell
+     softbuffer_rx.emplace_back();
+@@ -484,10 +486,20 @@ void ue::allocate_ce(srslte::sch_pdu* pdu, uint32_t lcid)
+           active_scell_list[enb_ue_cc_map[enb_cc_idx]] = true;
+         }
+         if (enb_cc_idx == enb_ue_cc_map.size() and pdu->get()->set_scell_activation_cmd(active_scell_list)) {
+-          phy->set_activation_deactivation_scell(rnti, active_scell_list);
+-          Info("CE:    Added SCell Activation CE.\n");
++          // phy->set_activation_deactivation_scell(rnti, active_scell_list);
++          // Info("CE:    Added SCell Activation CE.\n");
+           // Allocate and initialize Rx/Tx softbuffers for new carriers (exclude PCell)
+-          allocate_cc_buffers(active_scell_list.size() - 1);
++	  int active_sum = 0;
++	  for (size_t i = 0; i < active_scell_list.size(); i++) {
++		  active_sum += active_scell_list[i];
++	  }
++	  if (active_sum > 0) {
++	    phy->set_activation_deactivation_scell(rnti, active_scell_list);
++	  }
++          Info("CE:    Added SCell Activation CE.\n");
++	  allocate_cc_buffers(active_sum);
++	  Info("[ca-debug] Finish allocating and initializing buffers, num=%d.\n", active_sum);
++          printf("[ca-debug] Added SCell Activation CE; Finish allocating and initializing buffers, num=%d.\n", active_sum);
+         } else {
+           Error("CE:    Setting SCell Activation CE\n");
+         }
+diff --git a/srsenb/src/stack/rrc/rrc.cc b/srsenb/src/stack/rrc/rrc.cc
+index d754dda44..93b5efbcb 100644
+--- a/srsenb/src/stack/rrc/rrc.cc
++++ b/srsenb/src/stack/rrc/rrc.cc
+@@ -1951,8 +1951,8 @@ int rrc::ue::fill_scell_to_addmod_list(asn1::rrc::rrc_conn_recfg_r8_ies_s* conn_
+     nonul_cfg.phich_cfg_r10                             = cc_cfg->mib.phich_cfg;
+     nonul_cfg.pdsch_cfg_common_r10                      = cc_cfg_sib.pdsch_cfg_common;
+     // RadioResourceConfigCommonSCell-r10::ul-Configuration-r10
+-    cell.rr_cfg_common_scell_r10.ul_cfg_r10_present          = true;
+-    auto& ul_cfg                                             = cell.rr_cfg_common_scell_r10.ul_cfg_r10;
++    cell.rr_cfg_common_scell_r10.ul_cfg_r10_present          = false;
++    /* auto& ul_cfg                                             = cell.rr_cfg_common_scell_r10.ul_cfg_r10;
+     ul_cfg.ul_freq_info_r10.ul_carrier_freq_r10_present      = true;
+     ul_cfg.ul_freq_info_r10.ul_carrier_freq_r10              = cc_cfg->cell_cfg.ul_earfcn;
+     ul_cfg.p_max_r10_present                                 = cell_sib1.p_max_present;
+@@ -1963,6 +1963,7 @@ int rrc::ue::fill_scell_to_addmod_list(asn1::rrc::rrc_conn_recfg_r8_ies_s* conn_
+     ul_cfg.srs_ul_cfg_common_r10                             = cc_cfg_sib.srs_ul_cfg_common;
+     ul_cfg.ul_cp_len_r10.value                               = cc_cfg_sib.ul_cp_len.value;
+     ul_cfg.pusch_cfg_common_r10                              = cc_cfg_sib.pusch_cfg_common;
++    */
+     // RadioResourceConfigDedicatedSCell-r10
+     cell.rr_cfg_ded_scell_r10_present                                       = true;
+     cell.rr_cfg_ded_scell_r10.phys_cfg_ded_scell_r10_present                = true;
+@@ -1977,19 +1978,19 @@ int rrc::ue::fill_scell_to_addmod_list(asn1::rrc::rrc_conn_recfg_r8_ies_s* conn_
+     nonul_cfg_ded.pdsch_cfg_ded_r10.p_a.value                           = parent->cfg.pdsch_cfg.value;
+     cell.rr_cfg_ded_scell_r10.phys_cfg_ded_scell_r10.ul_cfg_r10_present = true;
+     auto& ul_cfg_ded                                  = cell.rr_cfg_ded_scell_r10.phys_cfg_ded_scell_r10.ul_cfg_r10;
+-    ul_cfg_ded.ant_info_ul_r10_present                = true;
+-    ul_cfg_ded.ant_info_ul_r10.tx_mode_ul_r10_present = true;
+-    asn1::number_to_enum(ul_cfg_ded.ant_info_ul_r10.tx_mode_ul_r10, parent->cfg.cell.nof_ports);
+-    ul_cfg_ded.pusch_cfg_ded_scell_r10_present           = true;
+-    ul_cfg_ded.ul_pwr_ctrl_ded_scell_r10_present         = true;
+-    ul_cfg_ded.ul_pwr_ctrl_ded_scell_r10.p0_ue_pusch_r10 = 0;
+-    ul_cfg_ded.ul_pwr_ctrl_ded_scell_r10.delta_mcs_enabled_r10.value =
+-        ul_pwr_ctrl_ded_scell_r10_s::delta_mcs_enabled_r10_opts::en0;
+-    ul_cfg_ded.ul_pwr_ctrl_ded_scell_r10.accumulation_enabled_r10   = true;
+-    ul_cfg_ded.ul_pwr_ctrl_ded_scell_r10.psrs_offset_ap_r10_present = true;
+-    ul_cfg_ded.ul_pwr_ctrl_ded_scell_r10.psrs_offset_ap_r10         = 3;
+-    ul_cfg_ded.ul_pwr_ctrl_ded_scell_r10.pathloss_ref_linking_r10.value =
+-        ul_pwr_ctrl_ded_scell_r10_s::pathloss_ref_linking_r10_opts::scell;
++    ul_cfg_ded.ant_info_ul_r10_present                = false;
++    // ul_cfg_ded.ant_info_ul_r10.tx_mode_ul_r10_present = true;
++    // asn1::number_to_enum(ul_cfg_ded.ant_info_ul_r10.tx_mode_ul_r10, parent->cfg.cell.nof_ports);
++    ul_cfg_ded.pusch_cfg_ded_scell_r10_present           = false;
++    ul_cfg_ded.ul_pwr_ctrl_ded_scell_r10_present         = false;
++    // ul_cfg_ded.ul_pwr_ctrl_ded_scell_r10.p0_ue_pusch_r10 = 0;
++    // ul_cfg_ded.ul_pwr_ctrl_ded_scell_r10.delta_mcs_enabled_r10.value =
++    //    ul_pwr_ctrl_ded_scell_r10_s::delta_mcs_enabled_r10_opts::en0;
++    //ul_cfg_ded.ul_pwr_ctrl_ded_scell_r10.accumulation_enabled_r10   = true;
++    //ul_cfg_ded.ul_pwr_ctrl_ded_scell_r10.psrs_offset_ap_r10_present = true;
++    //ul_cfg_ded.ul_pwr_ctrl_ded_scell_r10.psrs_offset_ap_r10         = 3;
++    //ul_cfg_ded.ul_pwr_ctrl_ded_scell_r10.pathloss_ref_linking_r10.value =
++    //    ul_pwr_ctrl_ded_scell_r10_s::pathloss_ref_linking_r10_opts::scell;
+     ul_cfg_ded.cqi_report_cfg_scell_r10_present                               = true;
+     ul_cfg_ded.cqi_report_cfg_scell_r10.nom_pdsch_rs_epre_offset_r10          = 0;
+     ul_cfg_ded.cqi_report_cfg_scell_r10.cqi_report_periodic_scell_r10_present = true;
