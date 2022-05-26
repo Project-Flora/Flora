@@ -29,7 +29,6 @@ n_prb = 25
 Execution
 ---------
 srsENB and srsEPC can run on the same machine.
-After installation, the current folder is ``./srsRAN``.
 
 ### srsEPC
 
@@ -42,7 +41,7 @@ sudo srsepc
 
 Open another terminal and run eNB. One has to specify configuration files to enable CA:
 ```
-sudo srsenb --enb_files.rr_config ../../rr-2ca.conf
+sudo srsenb --enb_files.rr_config ./rr-2ca.conf
 ```
 
 One can enable network searching on the UE, and select the customized operator to force connection.
