@@ -30,7 +30,6 @@ n_prb = 25
 Execution
 ---------
 srsENB and srsEPC can run on the same machine.
-After installation, the current folder is ./srsRAN.
 
 ### srsEPC
 
@@ -43,7 +42,7 @@ sudo srsepc
 
 Open another terminal and run eNB. One has to specify configuration files to enable intra-eNB handover:
 ```
-sudo srsenb --enb_files.rr_config ../../rr-ho.conf
+sudo srsenb --enb_files.rr_config ./rr-ho.conf
 ```
 
 One can enable network searching on the UE, and select the customized operator to force connection.
