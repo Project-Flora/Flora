@@ -50,3 +50,7 @@ The connection is successfully set up and CA gets enables when you see output si
 User 0x46 connected
 [ca-debug] Added SCell Activation CE; Finish allocating and initializing buffers, num=2
 ```
+
+Demo
+----
+The [demo video](https://youtu.be/36PUAmyAPs0) shows the experience of running CA on Google Pixel.
