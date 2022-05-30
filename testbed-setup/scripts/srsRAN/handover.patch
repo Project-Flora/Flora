@@ -1,0 +1,1207 @@
+diff --git a/lib/include/srslte/interfaces/enb_interfaces.h b/lib/include/srslte/interfaces/enb_interfaces.h
+index 5a1193e1a..af8bc8334 100644
+--- a/lib/include/srslte/interfaces/enb_interfaces.h
++++ b/lib/include/srslte/interfaces/enb_interfaces.h
+@@ -351,6 +351,7 @@ public:
+   virtual bool has_bearer(uint16_t rnti, uint32_t lcid)                                  = 0;
+   virtual bool suspend_bearer(uint16_t rnti, uint32_t lcid)                              = 0;
+   virtual bool resume_bearer(uint16_t rnti, uint32_t lcid)                               = 0;
++  virtual void reestablish(uint16_t rnti) {} // ho-impl
+ };
+ 
+ // PDCP interface for GTPU
+@@ -374,6 +375,7 @@ public:
+   virtual void enable_encryption(uint16_t rnti, uint32_t lcid)                                     = 0;
+   virtual bool
+   get_bearer_status(uint16_t rnti, uint32_t lcid, uint16_t* dlsn, uint16_t* dlhfn, uint16_t* ulsn, uint16_t* ulhfn) = 0;
++  virtual void reestablish(uint16_t rnti) {} // [ho-impl]
+ };
+ 
+ // PDCP interface for RLC
+diff --git a/srsenb/hdr/stack/rrc/rrc.h b/srsenb/hdr/stack/rrc/rrc.h
+index 39158a401..ed6972332 100644
+--- a/srsenb/hdr/stack/rrc/rrc.h
++++ b/srsenb/hdr/stack/rrc/rrc.h
+@@ -124,6 +124,9 @@ private:
+     void        set_activity_timeout(const activity_timeout_type_t type);
+     void        set_activity();
+     void        activity_timer_expired();
++    void        set_handover(); // [ho-impl]
++    void        set_handover_timeout(); // [ho-impl]
++    void        handover_timer_expired(); // [ho-impl]
+ 
+     uint32_t rl_failure();
+ 
+@@ -162,6 +165,11 @@ private:
+                     const asn1::unbounded_octstring<true>*             nas_pdu);
+     bool release_erabs();
+ 
++    void regenerate_keys_handover(uint32_t new_pci, uint32_t new_dl_earfcn); // ho-impl
++    void generate_as_keys(); // ho-impl
++    void apply_pdcp_srb_updates(); 
++    void apply_pdcp_drb_updates();
++
+     // handover
+     void handle_ho_preparation_complete(bool is_success, srslte::unique_byte_buffer_t container);
+ 
+@@ -178,6 +186,9 @@ private:
+     void send_dl_dcch(asn1::rrc::dl_dcch_msg_s*    dl_dcch_msg,
+                       srslte::unique_byte_buffer_t pdu = srslte::unique_byte_buffer_t());
+ 
++    void handle_intraenb_ho_cmd(const asn1::rrc::rrc_conn_recfg_r8_ies_s& conn_recfg); // ho-impl
++    int handle_crnti_ce(uint32_t temp_crnti); // ho-impl
++
+     uint16_t rnti   = 0;
+     rrc*     parent = nullptr;
+ 
+@@ -190,6 +201,7 @@ private:
+     // args
+     srslte::byte_buffer_pool*           pool = nullptr;
+     srslte::timer_handler::unique_timer activity_timer;
++    srslte::timer_handler::unique_timer handover_timer; // [ho-impl]
+ 
+     // cached for ease of context transfer
+     asn1::rrc::rrc_conn_recfg_s         last_rrc_conn_recfg;
+@@ -204,6 +216,7 @@ private:
+ 
+     // state
+     sched_interface::ue_cfg_t current_sched_ue_cfg = {};
++    sched_interface::ue_cfg_t next_sched_ue_cfg = {}; // [ho-impl]
+     uint32_t                  rlf_cnt              = 0;
+     uint8_t                   transaction_id       = 0;
+     rrc_state_t               state                = RRC_STATE_IDLE;
+@@ -254,6 +267,8 @@ private:
+      */
+     void apply_setup_phy_common(const asn1::rrc::rr_cfg_common_sib_s& config);
+ 
++    void apply_setup_phy_common(const asn1::rrc::rr_cfg_common_sib_s& config, bool update_phy); //[ho-impl]
++
+     /**
+      * Setups the PCell physical layer dedicated configuration of the UE. This method shall be called from the
+      * connection setup only.
+@@ -270,6 +285,9 @@ private:
+      * @param reconfig_r8 ASN1 reconfiguration message
+      */
+     void apply_reconf_phy_config(const asn1::rrc::rrc_conn_recfg_r8_ies_s& reconfig_r8);
++    void apply_reconf_phy_config(const asn1::rrc::rrc_conn_recfg_r8_ies_s& reconfig_r8, bool update_phy); // [ho-impl]
++
++    void fill_reconf_updates(asn1::rrc::rrc_conn_recfg_r8_ies_s&  recfg_r8); // [ho-impl]
+   }; // class ue
+ 
+   // args
+diff --git a/srsenb/hdr/stack/rrc/rrc_cell_cfg.h b/srsenb/hdr/stack/rrc/rrc_cell_cfg.h
+index 1840ea05b..72fabe678 100644
+--- a/srsenb/hdr/stack/rrc/rrc_cell_cfg.h
++++ b/srsenb/hdr/stack/rrc/rrc_cell_cfg.h
+@@ -85,7 +85,8 @@ private:
+ /** Class used to store all the resources specific to a UE's cell */
+ struct cell_ctxt_dedicated {
+   uint32_t                ue_cc_idx;
+-  const cell_info_common& cell_common;
++//  const cell_info_common& cell_common;
++  const cell_info_common* cell_common;
+   bool                    cqi_res_present = false;
+   bool                    sr_res_present  = false;
+   struct cqi_res_t {
+@@ -95,12 +96,14 @@ struct cell_ctxt_dedicated {
+     uint32_t sf_idx    = 0;
+   } cqi_res;
+ 
+-  explicit cell_ctxt_dedicated(uint32_t i_, const cell_info_common& c_) : ue_cc_idx(i_), cell_common(c_) {}
++//  explicit cell_ctxt_dedicated(uint32_t i_, const cell_info_common& c_) : ue_cc_idx(i_), cell_common(c_) {}
++  explicit cell_ctxt_dedicated(uint32_t i_, const cell_info_common& c_) : ue_cc_idx(i_), cell_common(&c_) {} //[ho-impl]
+ 
+   // forbid copying to not break counting of pucch allocated resources
+   cell_ctxt_dedicated(const cell_ctxt_dedicated&)     = delete;
+   cell_ctxt_dedicated(cell_ctxt_dedicated&&) noexcept = default;
+   cell_ctxt_dedicated& operator=(const cell_ctxt_dedicated&) = delete;
++  cell_ctxt_dedicated& operator=(cell_ctxt_dedicated&&) noexcept = default;
+ };
+ 
+ /** Class used to handle the allocation of a UE's resources across its cells */
+@@ -113,6 +116,10 @@ public:
+   ~cell_ctxt_dedicated_list();
+ 
+   cell_ctxt_dedicated* add_cell(uint32_t enb_cc_idx);
++  // TODO: ho bool                 set_cells(const std::vector<uint32_t>& enb_cc_idxs);
++  // TODO: ho bool                 rem_last_cell(); 
++  bool         rem_last_cell();
++  bool         set_cells(const std::vector<uint32_t>& enb_cc_idxs);
+ 
+   cell_ctxt_dedicated* get_ue_cc_idx(uint32_t ue_cc_idx)
+   {
+diff --git a/srsenb/hdr/stack/rrc/rrc_mobility.h b/srsenb/hdr/stack/rrc/rrc_mobility.h
+index 5e2bb6d1e..9655d9824 100644
+--- a/srsenb/hdr/stack/rrc/rrc_mobility.h
++++ b/srsenb/hdr/stack/rrc/rrc_mobility.h
+@@ -95,6 +95,12 @@ public:
+   bool fill_conn_recfg_msg(asn1::rrc::rrc_conn_recfg_r8_ies_s* conn_recfg);
+   void handle_ue_meas_report(const asn1::rrc::meas_report_s& msg);
+   void handle_ho_preparation_complete(bool is_success, srslte::unique_byte_buffer_t container);
++  void start_intra_enb_ho(); // [ho-impl]
++  void handle_crnti_ce(uint16_t old_rnti, uint16_t new_rnti); // ho-impl
++  bool is_ho_running(); // ho-impl
++  void set_ho_stop(); // ho-impl
++  bool is_ho_performed(); // ho-impl
++  void set_ho_performed(); // ho-impl
+ 
+ private:
+   enum class ho_interface_t { S1, X2, interSector };
+@@ -102,6 +108,11 @@ private:
+   bool start_ho_preparation(uint32_t target_eci, uint8_t measobj_id, bool fwd_direct_path_available);
+   bool start_enb_status_transfer();
+ 
++  void fill_mobility_reconf_common(asn1::rrc::dl_dcch_msg_s& msg,
++                                                          const cell_info_common&   target_cell,
++                                                          uint32_t                  src_dl_earfcn,
++                                                          uint32_t                  src_pci); // [ho-impl]
++
+   bool update_ue_var_meas_cfg(const asn1::rrc::meas_cfg_s& source_meas_cfg,
+                               uint32_t                     target_enb_cc_idx,
+                               asn1::rrc::meas_cfg_s*       diff_meas_cfg);
+@@ -114,10 +125,16 @@ private:
+   rrc::enb_mobility_handler* cfg     = nullptr;
+   srslte::byte_buffer_pool*  pool    = nullptr;
+   srslte::log_ref            rrc_log;
++  bool handover_running     = false; // ho-impl
++  uint16_t last_temp_crnti  = SRSLTE_CRNTI_START; // ho-impl
++  bool handover_performed   = false;
+ 
+   // vars
+   std::shared_ptr<const var_meas_cfg_t> ue_var_meas;
+ 
++  const cell_info_common* target_cell_     = nullptr; // ho-impl
++  const cell_info_common* source_cell_     = nullptr; // ho-impl
++
+   class sourceenb_ho_proc_t
+   {
+   public:
+diff --git a/srsenb/hdr/stack/upper/pdcp.h b/srsenb/hdr/stack/upper/pdcp.h
+index c55e7acbb..2afa280cc 100644
+--- a/srsenb/hdr/stack/upper/pdcp.h
++++ b/srsenb/hdr/stack/upper/pdcp.h
+@@ -53,6 +53,7 @@ public:
+   void enable_encryption(uint16_t rnti, uint32_t lcid) override;
+   bool get_bearer_status(uint16_t rnti, uint32_t lcid, uint16_t* dlsn, uint16_t* dlhfn, uint16_t* ulsn, uint16_t* ulhfn)
+       override;
++  void reestablish(uint16_t rnti) override; // impl
+ 
+ private:
+   class user_interface_rlc : public srsue::rlc_interface_pdcp
+diff --git a/srsenb/hdr/stack/upper/rlc.h b/srsenb/hdr/stack/upper/rlc.h
+index e3b3f2548..1ec290131 100644
+--- a/srsenb/hdr/stack/upper/rlc.h
++++ b/srsenb/hdr/stack/upper/rlc.h
+@@ -55,6 +55,7 @@ public:
+   bool has_bearer(uint16_t rnti, uint32_t lcid);
+   bool suspend_bearer(uint16_t rnti, uint32_t lcid);
+   bool resume_bearer(uint16_t rnti, uint32_t lcid);
++  void reestablish(uint16_t rnti); // ho-impl
+ 
+   // rlc_interface_pdcp
+   void        write_sdu(uint16_t rnti, uint32_t lcid, srslte::unique_byte_buffer_t sdu);
+diff --git a/srsenb/src/stack/mac/mac.cc b/srsenb/src/stack/mac/mac.cc
+index 6846883d8..0d5a0f40c 100644
+--- a/srsenb/src/stack/mac/mac.cc
++++ b/srsenb/src/stack/mac/mac.cc
+@@ -206,19 +206,21 @@ int mac::ue_cfg(uint16_t rnti, sched_interface::ue_cfg_t* cfg)
+   ue_ptr = it->second.get();
+ 
+   // Start TA FSM in UE entity
++  Info("[ho-debug] Before start_ta\n");
+   ue_ptr->start_ta();
+ 
+-  // Add RNTI to the PHY (pregenerate signals) now instead of after PRACH
+-  if (not ue_ptr->is_phy_added) {
+-    Info("Registering RNTI=0x%X to PHY...\n", rnti);
+-    // Register new user in PHY with first CC index
+-    if (phy_h->add_rnti(rnti, (SRSLTE_MRNTI) ? 0 : cfg->supported_cc_list.front().enb_cc_idx, false) == SRSLTE_ERROR) {
+-      Error("Registering new UE RNTI=0x%X to PHY\n", rnti);
+-    }
+-    Info("Done registering RNTI=0x%X to PHY...\n", rnti);
+-    ue_ptr->is_phy_added = true;
+-  }
+-
++  // // Add RNTI to the PHY (pregenerate signals) now instead of after PRACH
++  // if (not ue_ptr->is_phy_added) {
++  //   Info("Registering RNTI=0x%X to PHY...\n", rnti);
++  //   // Register new user in PHY with first CC index
++  //   if (phy_h->add_rnti(rnti, (SRSLTE_MRNTI) ? 0 : cfg->supported_cc_list.front().enb_cc_idx, false) == SRSLTE_ERROR) { //[ho-debug]
++  //     Error("Registering new UE RNTI=0x%X to PHY\n", rnti);
++  //   }
++  //   Info("Done registering RNTI=0x%X to PHY...\n", rnti);
++  //   ue_ptr->is_phy_added = true;
++  // }
++
++  Info("[ho-debug] mac::ue_cfg, Status of lcid=2, direction=%d\n", cfg->ue_bearers[2].direction);
+   // Update Scheduler configuration
+   if (cfg != nullptr and scheduler.ue_cfg(rnti, *cfg) == SRSLTE_ERROR) {
+     Error("Registering new UE rnti=0x%x to SCHED\n", rnti);
+diff --git a/srsenb/src/stack/mac/scheduler.cc b/srsenb/src/stack/mac/scheduler.cc
+index 1be227f4a..f977b9d62 100644
+--- a/srsenb/src/stack/mac/scheduler.cc
++++ b/srsenb/src/stack/mac/scheduler.cc
+@@ -211,7 +211,9 @@ int sched::ue_cfg(uint16_t rnti, const sched_interface::ue_cfg_t& ue_cfg)
+     // create new user
+     ue_db[rnti].init(rnti, sched_cell_params);
+     it = ue_db.find(rnti);
++    log_h->info("[ho-debug] Not found user=0x%x\n", rnti);
+   }
++  log_h->info("[ho-debug] sched::ue_cfg, Status of lcid=2, direction=%d\n", ue_cfg.ue_bearers[2].direction);
+   it->second.set_cfg(ue_cfg);
+ 
+   return SRSLTE_SUCCESS;
+diff --git a/srsenb/src/stack/mac/scheduler_ue.cc b/srsenb/src/stack/mac/scheduler_ue.cc
+index b2a25f87b..dcd17c7db 100644
+--- a/srsenb/src/stack/mac/scheduler_ue.cc
++++ b/srsenb/src/stack/mac/scheduler_ue.cc
+@@ -110,6 +110,7 @@ void sched_ue::set_cfg(const sched_interface::ue_cfg_t& cfg_)
+     uint32_t primary_cc_idx = 0;
+     if (not cfg_.supported_cc_list.empty()) {
+       primary_cc_idx = cfg_.supported_cc_list[0].enb_cc_idx;
++      log_h->info("[ho-debug] first configured cc, Primary enb_cc_idx=%u\n", primary_cc_idx);
+     } else {
+       Warning("Primary cc idx not provided in scheduler ue_cfg. Defaulting to cc_idx=0\n");
+     }
+@@ -126,6 +127,7 @@ void sched_ue::set_cfg(const sched_interface::ue_cfg_t& cfg_)
+   // update bearer cfgs
+   for (uint32_t i = 0; i < sched_interface::MAX_LC; ++i) {
+     set_bearer_cfg_unlocked(i, cfg.ue_bearers[i]);
++    log_h->info("[ho-debug] Config bearer idx = %u, state = %u\n", i, cfg.ue_bearers[i].direction);
+   }
+ 
+   // either add a new carrier, or reconfigure existing one
+@@ -136,14 +138,18 @@ void sched_ue::set_cfg(const sched_interface::ue_cfg_t& cfg_)
+     if (ue_idx >= prev_supported_cc_list.size()) {
+       // New carrier needs to be added
+       carriers.emplace_back(cfg, (*cell_params_list)[cc_cfg.enb_cc_idx], rnti, ue_idx);
++      log_h->info("[ho-debug] Add a new carrier, ud_idx=%u, enb_cc_idx=%u\n", ue_idx, cc_cfg.enb_cc_idx);
+     } else if (cc_cfg.enb_cc_idx != prev_supported_cc_list[ue_idx].enb_cc_idx) {
+       // One carrier was added in the place of another
+       carriers[ue_idx] = sched_ue_carrier{cfg, (*cell_params_list)[cc_cfg.enb_cc_idx], rnti, ue_idx};
++      log_h->info("SCHED: PCell has changed for rnti=0x%x, ue_idx=%u, new enb_cc_idx=%u.\n", rnti, ue_idx, cc_cfg.enb_cc_idx);
+       if (ue_idx == 0) {
+         log_h->info("SCHED: PCell has changed for rnti=0x%x.\n", rnti);
+       }
+     } else {
+       // The SCell internal configuration may have changed
++      log_h->info("SCHED: Cell not changed for rnti=0x%x, ue_idx=%u, old_enb_cc_idx=%u, new_enb_cc_idx=%u\n", 
++        rnti, ue_idx, prev_supported_cc_list[ue_idx].enb_cc_idx, cc_cfg.enb_cc_idx);
+       carriers[ue_idx].set_cfg(cfg);
+     }
+     scell_activation_state_changed |= carriers[ue_idx].is_active() != cc_cfg.active and ue_idx > 0;
+@@ -1256,6 +1262,7 @@ void sched_ue_carrier::set_cfg(const sched_interface::ue_cfg_t& cfg_)
+   }
+   cfg = &cfg_;
+   // Config HARQ processes
++  Debug("[ho-debug] sched_ue_carrier::set_cfg, before harq_ent.set_cfg\n");
+   harq_ent.set_cfg(cfg->maxharq_tx);
+ }
+ 
+diff --git a/srsenb/src/stack/mac/ue.cc b/srsenb/src/stack/mac/ue.cc
+index eb6c6879c..dfea7d927 100644
+--- a/srsenb/src/stack/mac/ue.cc
++++ b/srsenb/src/stack/mac/ue.cc
+@@ -362,6 +362,7 @@ bool ue::process_ce(srslte::sch_subh* subh)
+     case srslte::ul_sch_lcid::CRNTI:
+       old_rnti = subh->get_c_rnti();
+       Info("CE:    Received C-RNTI from temp_rnti=0x%x, rnti=0x%x\n", rnti, old_rnti);
++      printf("CE:    Received C-RNTI from temp_rnti=0x%x, rnti=0x%x\n", rnti, old_rnti);
+       if (sched->ue_exists(old_rnti)) {
+         rrc->upd_user(rnti, old_rnti);
+         rnti = old_rnti;
+diff --git a/srsenb/src/stack/rrc/rrc.cc b/srsenb/src/stack/rrc/rrc.cc
+index d754dda44..069a30ea6 100644
+--- a/srsenb/src/stack/rrc/rrc.cc
++++ b/srsenb/src/stack/rrc/rrc.cc
+@@ -218,10 +218,16 @@ void rrc::upd_user(uint16_t new_rnti, uint16_t old_rnti)
+   // Send Reconfiguration to old_rnti if is RRC_CONNECT or RRC Release if already released here
+   auto old_it = users.find(old_rnti);
+   if (old_it != users.end()) {
++    if (old_it->second->mobility_handler->is_ho_running()) {
++      old_it->second->mobility_handler->handle_crnti_ce(old_rnti, new_rnti);  //trigger(ue::rrc_mobility::user_crnti_upd_ev{old_rnti, new_rnti});
++      rrc_log->info("[ho-debug] rrc::upd_user, going to call handle_crnti_ce, old_rnti=0x%x, new_rnti=0x%x\n", old_rnti, new_rnti);
++    } 
++    else {
+     if (old_it->second->is_connected()) {
+       old_it->second->send_connection_reconf_upd(srslte::allocate_unique_buffer(*pool));
+     } else {
+       old_it->second->send_connection_release();
++    } 
+     }
+   }
+ }
+@@ -998,6 +1004,8 @@ rrc::ue::ue(rrc* outer_rrc, uint16_t rnti_, const sched_interface::ue_cfg_t& sch
+   set_activity_timeout(MSG3_RX_TIMEOUT); // next UE response is Msg3
+   mobility_handler.reset(new rrc_mobility(this));
+ 
++  handover_timer = outer_rrc->timers->get_unique_timer(); // [ho-impl]
++
+   // Configure
+   apply_setup_phy_common(parent->cfg.sibs[1].sib2().rr_cfg_common);
+ 
+@@ -1020,6 +1028,33 @@ uint32_t rrc::ue::rl_failure()
+   return rlf_cnt;
+ }
+ 
++// [ho-impl]
++void rrc::ue::set_handover()
++{
++  handover_timer.run();
++  printf("[ho-debug] rrc_ue: handover_timer run.\n");
++}
++
++// [ho-impl]
++void rrc::ue::handover_timer_expired()
++{
++  printf("[ho-debug] rrc_ue::handover_timer_expired.\n");
++  handover_timer.stop();
++  mobility_handler->start_intra_enb_ho();
++}
++
++// [ho-impl]
++void rrc::ue::set_handover_timeout()
++{
++  uint32_t deadline_s  = 3;
++  uint32_t deadline_ms = 0;
++
++  uint32_t deadline = deadline_s * 1e3 + deadline_ms;
++  handover_timer.set(deadline, [this](uint32_t tid) { handover_timer_expired(); });
++
++  set_handover();
++}
++
+ void rrc::ue::set_activity()
+ {
+   // re-start activity timer with current timeout value
+@@ -1136,6 +1171,14 @@ void rrc::ue::parse_ul_dcch(uint32_t lcid, srslte::unique_byte_buffer_t pdu)
+       parent->rrc_log->console("User 0x%x connected\n", rnti);
+       state = RRC_STATE_REGISTERED;
+       set_activity_timeout(UE_INACTIVITY_TIMEOUT);
++      if (mobility_handler->is_ho_running()) {
++        mobility_handler->set_ho_stop();
++        mobility_handler->set_ho_performed();
++      }
++      if (not mobility_handler->is_ho_performed()) {
++        printf("[ho-debug] rrc_ue: set timers\n"); // [ho-debug]
++        set_handover_timeout();
++      }
+       break;
+     case ul_dcch_msg_type_c::c1_c_::types::security_mode_complete:
+       handle_security_mode_complete(&ul_dcch_msg.msg.c1().security_mode_complete());
+@@ -1244,7 +1287,7 @@ void rrc::ue::handle_rrc_reconf_complete(rrc_conn_recfg_complete_s* msg, srslte:
+         list.resize(ue_cc_idx + 1);
+       }
+       list[ue_cc_idx].active     = true;
+-      list[ue_cc_idx].enb_cc_idx = ue_cell.cell_common.enb_cc_idx;
++      list[ue_cc_idx].enb_cc_idx = ue_cell.cell_common->enb_cc_idx; // [ho-impl] list[ue_cc_idx].enb_cc_idx = ue_cell.cell_common.enb_cc_idx;
+     }
+     parent->mac->ue_cfg(rnti, &current_sched_ue_cfg);
+ 
+@@ -1253,12 +1296,15 @@ void rrc::ue::handle_rrc_reconf_complete(rrc_conn_recfg_complete_s* msg, srslte:
+     bearer_cfg.direction                                = srsenb::sched_interface::ue_bearer_cfg_t::BOTH;
+     bearer_cfg.group                                    = 0;
+     parent->mac->bearer_ue_cfg(rnti, 2, &bearer_cfg);
++    current_sched_ue_cfg.ue_bearers[2] = bearer_cfg; // [ho-impl]
++
+     bearer_cfg.group = last_rrc_conn_recfg.crit_exts.c1()
+                            .rrc_conn_recfg_r8()
+                            .rr_cfg_ded.drb_to_add_mod_list[0]
+                            .lc_ch_cfg.ul_specific_params.lc_ch_group;
+     for (const std::pair<const uint8_t, erab_t>& erab_pair : erabs) {
+       parent->mac->bearer_ue_cfg(rnti, erab_pair.second.id - 2, &bearer_cfg);
++      current_sched_ue_cfg.ue_bearers[erab_pair.second.id - 2] = bearer_cfg; // [ho-impl]
+     }
+ 
+     // Acknowledge Dedicated Configuration
+@@ -1317,6 +1363,60 @@ void rrc::ue::set_bitrates(const asn1::s1ap::ue_aggregate_maximum_bitrate_s& rat
+   bitrates = rates;
+ }
+ 
++/*
++ * ho-impl
++ */
++void rrc::ue::regenerate_keys_handover(uint32_t new_pci, uint32_t new_dl_earfcn)
++{
++  parent->rrc_log->info("[ho-debug] Regenerating KeNB with PCI=0x%02x, DL-EARFCN=%d", new_pci, new_dl_earfcn);
++  // parent->rrc_log->info(k_enb, 32, "Old K_eNB (k_enb)");
++  // Generate K_enb*
++  uint8_t k_enb_star[32];
++  srslte::security_generate_k_enb_star(k_enb, new_pci, new_dl_earfcn, k_enb_star);
++
++  // K_enb becomes K_enb*
++  memcpy(k_enb, k_enb_star, 32);
++
++  generate_as_keys();
++}
++
++void rrc::ue::generate_as_keys()
++{
++  // Generate K_rrc_enc and K_rrc_int
++  srslte::security_generate_k_rrc(
++      k_enb, sec_cfg.cipher_algo, sec_cfg.integ_algo, sec_cfg.k_rrc_enc.data(), sec_cfg.k_rrc_int.data());
++
++  // Generate K_up_enc and K_up_int
++  security_generate_k_up(
++      k_enb, sec_cfg.cipher_algo, sec_cfg.integ_algo, sec_cfg.k_up_enc.data(), sec_cfg.k_up_int.data());
++
++  parent->rrc_log->info_hex(k_enb, 32, "K_eNB (k_enb)");
++  parent->rrc_log->info_hex(sec_cfg.k_rrc_enc.data(), 32, "RRC Encryption Key (k_rrc_enc)");
++  parent->rrc_log->info_hex(sec_cfg.k_rrc_int.data(), 32, "RRC Integrity Key (k_rrc_int)");
++  parent->rrc_log->info_hex(sec_cfg.k_up_enc.data(), 32, "UP Encryption Key (k_up_enc)");
++}
++
++void rrc::ue::apply_pdcp_srb_updates()
++{
++  // SRB1
++  parent->pdcp->config_security(rnti, RB_ID_SRB1, sec_cfg);
++  parent->pdcp->enable_integrity(rnti, RB_ID_SRB1);
++  parent->pdcp->enable_encryption(rnti, RB_ID_SRB1);
++
++  // SRB2
++  parent->pdcp->config_security(rnti, RB_ID_SRB2, sec_cfg);
++  parent->pdcp->enable_integrity(rnti, RB_ID_SRB2);
++  parent->pdcp->enable_encryption(rnti, RB_ID_SRB2);
++}
++
++void rrc::ue::apply_pdcp_drb_updates()
++{
++  // Configure DRB1 in PDCP
++  parent->pdcp->config_security(rnti, RB_ID_DRB1, sec_cfg);
++  parent->pdcp->enable_integrity(rnti, RB_ID_DRB1);
++  parent->pdcp->enable_encryption(rnti, RB_ID_DRB1);
++}
++
+ void rrc::ue::set_security_capabilities(const asn1::s1ap::ue_security_cap_s& caps)
+ {
+   security_capabilities = caps;
+@@ -1933,7 +2033,7 @@ int rrc::ue::fill_scell_to_addmod_list(asn1::rrc::rrc_conn_recfg_r8_ies_s* conn_
+       continue;
+     }
+     uint32_t                scell_idx = p.ue_cc_idx;
+-    const cell_info_common* cc_cfg    = &p.cell_common;
++    const cell_info_common* cc_cfg    = p.cell_common; // [ho-impl] &p.cell_common;
+     const sib_type1_s&      cell_sib1 = cc_cfg->sib1;
+     const sib_type2_s&      cell_sib2 = cc_cfg->sib2;
+ 
+@@ -2324,6 +2424,225 @@ void rrc::ue::send_dl_dcch(dl_dcch_msg_s* dl_dcch_msg, srslte::unique_byte_buffe
+   }
+ }
+ 
++/*
++ * ho-impl
++ */
++void rrc::ue::fill_reconf_updates(asn1::rrc::rrc_conn_recfg_r8_ies_s&  recfg_r8)
++{
++  // Compute pending updates and fill reconf msg
++  recfg_r8.rr_cfg_ded_present = true;
++  // recfg_r8.rr_cfg_ded.phys_cfg_ded_present = true;
++  // phys_cfg_ded_s* phy_cfg = &(recfg_r8.rr_cfg_ded.phys_cfg_ded);
++
++  rr_cfg_ded_s* rr_cfg = &(recfg_r8.rr_cfg_ded);
++
++  // Add SRB1 to cfg
++  rr_cfg->srb_to_add_mod_list_present = true;
++  rr_cfg->srb_to_add_mod_list.resize(1);
++  rr_cfg->srb_to_add_mod_list[0].srb_id            = 1;
++  rr_cfg->srb_to_add_mod_list[0].lc_ch_cfg_present = true;
++  rr_cfg->srb_to_add_mod_list[0].lc_ch_cfg.set(srb_to_add_mod_s::lc_ch_cfg_c_::types::default_value);
++  rr_cfg->srb_to_add_mod_list[0].rlc_cfg_present = true;
++  rr_cfg->srb_to_add_mod_list[0].rlc_cfg.set(srb_to_add_mod_s::rlc_cfg_c_::types::default_value);
++
++  // mac-MainConfig
++  rr_cfg->mac_main_cfg_present  = true;
++  mac_main_cfg_s* mac_cfg       = &rr_cfg->mac_main_cfg.set_explicit_value();
++  mac_cfg->ul_sch_cfg_present   = true;
++  mac_cfg->ul_sch_cfg           = parent->cfg.mac_cnfg.ul_sch_cfg;
++  mac_cfg->phr_cfg_present      = true;
++  mac_cfg->phr_cfg              = parent->cfg.mac_cnfg.phr_cfg;
++  mac_cfg->time_align_timer_ded = parent->cfg.mac_cnfg.time_align_timer_ded;
++
++  // physicalConfigDedicated
++  rr_cfg->phys_cfg_ded_present       = true;
++  phys_cfg_ded_s* phy_cfg            = &rr_cfg->phys_cfg_ded;
++  phy_cfg->pusch_cfg_ded_present     = true;
++  phy_cfg->pusch_cfg_ded             = parent->cfg.pusch_cfg;
++  phy_cfg->sched_request_cfg_present = true;
++  phy_cfg->sched_request_cfg.set_setup();
++  phy_cfg->sched_request_cfg.setup().dsr_trans_max = parent->cfg.sr_cfg.dsr_max;
++
++  // set default antenna config
++  phy_cfg->ant_info_present = true;
++  phy_cfg->ant_info.set_explicit_value();
++  if (parent->cfg.cell.nof_ports == 1) {
++    phy_cfg->ant_info.explicit_value().tx_mode.value = ant_info_ded_s::tx_mode_e_::tm1;
++  } else {
++    phy_cfg->ant_info.explicit_value().tx_mode.value = ant_info_ded_s::tx_mode_e_::tm2;
++  }
++  phy_cfg->ant_info.explicit_value().ue_tx_ant_sel.set(setup_e::release);
++
++  phy_cfg->sched_request_cfg.setup().sr_cfg_idx       = (uint8_t)cell_ded_list.get_sr_res()->sr_I;
++  phy_cfg->sched_request_cfg.setup().sr_pucch_res_idx = (uint16_t)cell_ded_list.get_sr_res()->sr_N_pucch;
++
++  // Power control
++  phy_cfg->ul_pwr_ctrl_ded_present              = true;
++  phy_cfg->ul_pwr_ctrl_ded.p0_ue_pusch          = 0;
++  phy_cfg->ul_pwr_ctrl_ded.delta_mcs_enabled    = ul_pwr_ctrl_ded_s::delta_mcs_enabled_e_::en0;
++  phy_cfg->ul_pwr_ctrl_ded.accumulation_enabled = true;
++  phy_cfg->ul_pwr_ctrl_ded.p0_ue_pucch = 0, phy_cfg->ul_pwr_ctrl_ded.psrs_offset = 3;
++
++  // PDSCH
++  phy_cfg->pdsch_cfg_ded_present = true;
++  phy_cfg->pdsch_cfg_ded.p_a     = parent->cfg.pdsch_cfg;
++
++  // PUCCH
++  phy_cfg->pucch_cfg_ded_present = true;
++  phy_cfg->pucch_cfg_ded.ack_nack_repeat.set(pucch_cfg_ded_s::ack_nack_repeat_c_::types::release);
++
++  // CQI report
++  phy_cfg->cqi_report_cfg_present = true;
++  if (parent->cfg.cqi_cfg.mode == RRC_CFG_CQI_MODE_APERIODIC) {
++    phy_cfg->cqi_report_cfg.cqi_report_mode_aperiodic_present = true;
++    phy_cfg->cqi_report_cfg.cqi_report_mode_aperiodic         = cqi_report_mode_aperiodic_e::rm30;
++  } else {
++    // phy_cfg->cqi_report_cfg.cqi_report_periodic_present = true;
++    // phy_cfg->cqi_report_cfg.cqi_report_periodic.set_setup();
++    // phy_cfg->cqi_report_cfg.cqi_report_periodic.setup().cqi_format_ind_periodic.set(
++    //     cqi_report_periodic_c::setup_s_::cqi_format_ind_periodic_c_::types::wideband_cqi);
++    // phy_cfg->cqi_report_cfg.cqi_report_periodic.setup().simul_ack_nack_and_cqi = parent->cfg.cqi_cfg.simultaneousAckCQI;
++    // if (is_setup) {
++    //   if (get_cqi(&phy_cfg->cqi_report_cfg.cqi_report_periodic.setup().cqi_pmi_cfg_idx,
++    //               &phy_cfg->cqi_report_cfg.cqi_report_periodic.setup().cqi_pucch_res_idx,
++    //               UE_PCELL_CC_IDX)) {
++    //     parent->rrc_log->error("Allocating CQI resources for rnti=%d\n", rnti);
++    //     return;
++    //   }
++    // } else {
++    //   get_cqi(&phy_cfg->cqi_report_cfg.cqi_report_periodic.setup().cqi_pucch_res_idx,
++    //           &phy_cfg->cqi_report_cfg.cqi_report_periodic.setup().cqi_pmi_cfg_idx,
++    //           UE_PCELL_CC_IDX);
++    // }
++    phy_cfg->cqi_report_cfg.cqi_report_periodic_present = true;
++    auto& cqi_rep                                       = phy_cfg->cqi_report_cfg.cqi_report_periodic.set_setup();
++    get_cqi(&cqi_rep.cqi_pmi_cfg_idx, &cqi_rep.cqi_pucch_res_idx, UE_PCELL_CC_IDX);
++    cqi_rep.cqi_format_ind_periodic.set(
++        cqi_report_periodic_c::setup_s_::cqi_format_ind_periodic_c_::types::wideband_cqi);
++    cqi_rep.simul_ack_nack_and_cqi = parent->cfg.cqi_cfg.simultaneousAckCQI;
++    if (phy_cfg->ant_info_present and
++        ((phy_cfg->ant_info.explicit_value().tx_mode == ant_info_ded_s::tx_mode_e_::tm3) ||
++         (phy_cfg->ant_info.explicit_value().tx_mode == ant_info_ded_s::tx_mode_e_::tm4))) {
++      uint16_t ri_idx = 0;
++      if (get_ri(parent->cfg.cqi_cfg.m_ri, &ri_idx) == SRSLTE_SUCCESS) {
++        phy_cfg->cqi_report_cfg.cqi_report_periodic.set_setup();
++        phy_cfg->cqi_report_cfg.cqi_report_periodic.setup().ri_cfg_idx_present = true;
++        phy_cfg->cqi_report_cfg.cqi_report_periodic.setup().ri_cfg_idx         = ri_idx;
++      } else {
++        parent->rrc_log->console("\nWarning: Configured wrong M_ri parameter.\n\n");
++      }
++    } else {
++      phy_cfg->cqi_report_cfg.cqi_report_periodic.setup().ri_cfg_idx_present = false;
++    }
++  }
++  phy_cfg->cqi_report_cfg.nom_pdsch_rs_epre_offset = 0;
++
++  // phy_cfg->ant_info_present              = true;
++  // phy_cfg->ant_info.set_explicit_value() = parent->cfg.antenna_info;
++  // phy_cfg->cqi_report_cfg_present        = true;
++  // if (parent->cfg.cqi_cfg.mode == RRC_CFG_CQI_MODE_APERIODIC) {
++  //   phy_cfg->cqi_report_cfg.cqi_report_mode_aperiodic_present = true;
++  //   if (phy_cfg->ant_info_present and
++  //       phy_cfg->ant_info.explicit_value().tx_mode.value == ant_info_ded_s::tx_mode_e_::tm4) {
++  //     phy_cfg->cqi_report_cfg.cqi_report_mode_aperiodic = cqi_report_mode_aperiodic_e::rm31;
++  //   } else {
++  //     phy_cfg->cqi_report_cfg.cqi_report_mode_aperiodic = cqi_report_mode_aperiodic_e::rm30;
++  //   }
++  // } else {
++  //   phy_cfg->cqi_report_cfg.cqi_report_periodic_present = true;
++  //   auto& cqi_rep                                       = phy_cfg->cqi_report_cfg.cqi_report_periodic.set_setup();
++  //   get_cqi(&cqi_rep.cqi_pmi_cfg_idx, &cqi_rep.cqi_pucch_res_idx, UE_PCELL_CC_IDX);
++  //   cqi_rep.cqi_format_ind_periodic.set(
++  //       cqi_report_periodic_c::setup_s_::cqi_format_ind_periodic_c_::types::wideband_cqi);
++  //   cqi_rep.simul_ack_nack_and_cqi = parent->cfg.cqi_cfg.simultaneousAckCQI;
++  //   if (phy_cfg->ant_info_present and
++  //       ((phy_cfg->ant_info.explicit_value().tx_mode == ant_info_ded_s::tx_mode_e_::tm3) ||
++  //        (phy_cfg->ant_info.explicit_value().tx_mode == ant_info_ded_s::tx_mode_e_::tm4))) {
++  //     uint16_t ri_idx = 0;
++  //     if (get_ri(parent->cfg.cqi_cfg.m_ri, &ri_idx) == SRSLTE_SUCCESS) {
++  //       phy_cfg->cqi_report_cfg.cqi_report_periodic.set_setup();
++  //       phy_cfg->cqi_report_cfg.cqi_report_periodic.setup().ri_cfg_idx_present = true;
++  //       phy_cfg->cqi_report_cfg.cqi_report_periodic.setup().ri_cfg_idx         = ri_idx;
++  //     } else {
++  //       parent->rrc_log->console("\nWarning: Configured wrong M_ri parameter.\n\n");
++  //     }
++  //   } else {
++  //     phy_cfg->cqi_report_cfg.cqi_report_periodic.setup().ri_cfg_idx_present = false;
++  //   }
++  // }
++  // phy_cfg->cqi_report_cfg.nom_pdsch_rs_epre_offset = 0;
++  // // PDSCH
++  // phy_cfg->pdsch_cfg_ded_present = true;
++  // phy_cfg->pdsch_cfg_ded.p_a     = parent->cfg.pdsch_cfg;
++
++//  apply_reconf_phy_config(recfg_r8); // cmd not received, if added
++//  current_sched_ue_cfg.dl_ant_info = srslte::make_ant_info_ded(phy_cfg->ant_info.explicit_value());
++//  parent->mac->ue_cfg(rnti, &current_sched_ue_cfg); // cmd not received, if added
++//  parent->mac->phy_config_enabled(rnti, false); // cmd not received, if added
++
++}
++
++int rrc::ue::handle_crnti_ce(uint32_t temp_crnti)
++{
++  // Change PCell and add SCell configurations to MAC/Scheduler
++  current_sched_ue_cfg = next_sched_ue_cfg;
++
++  // keep DRBs disabled until RRCReconfComplete is received
++  for (uint32_t i = 3; i < sched_interface::MAX_LC; i++) {
++    current_sched_ue_cfg.ue_bearers[i].direction = srsenb::sched_interface::ue_bearer_cfg_t::IDLE;
++  }
++
++  // Re-activate SRBs UL (needed for ReconfComplete)
++  // for (uint32_t i = srb_to_lcid(lte_srb::srb1); i <= srb_to_lcid(lte_srb::srb2); ++i) {
++  //   current_sched_ue_cfg.ue_bearers[i] = next_sched_ue_cfg.ue_bearers[i];
++  // }
++
++  return parent->mac->ue_set_crnti(temp_crnti, rnti, &current_sched_ue_cfg);
++}
++
++/*
++ * ho-impl
++ */
++void rrc::ue::handle_intraenb_ho_cmd(const asn1::rrc::rrc_conn_recfg_r8_ies_s& conn_recfg)
++{
++  next_sched_ue_cfg = current_sched_ue_cfg;
++  next_sched_ue_cfg.supported_cc_list.resize(1);
++  next_sched_ue_cfg.supported_cc_list[0].active = true;
++  next_sched_ue_cfg.supported_cc_list[0].enb_cc_idx =
++      parent->cell_common_list->get_pci(conn_recfg.mob_ctrl_info.target_pci)->enb_cc_idx;
++
++  // ue_cfg_apply_conn_reconf(next_sched_ue_cfg, conn_recfg, *rrc_cfg); // TODO: double check involved fields are not present
++  printf("[ho-debug] handle_intraenb_ho_cmd: rr_cfg_ded_present=%d, meas_cfg_present=%d\n", conn_recfg.rr_cfg_ded_present, conn_recfg.meas_cfg_present);
++//  ue_cfg_apply_capabilities(next_sched_ue_cfg, *rrc_cfg, uecaps);
++  // ue_cfg_apply_reconf_complete_updates(next_sched_ue_cfg, conn_recfg, ue_cell_list); // TODO: double check involved fields are not present
++  printf("[ho-debug] handle_intraenb_ho_cmd: rr_cfg_ded_present=%d\n", conn_recfg.rr_cfg_ded_present);
++
++  // Freeze SCells
++  // NOTE: this avoids that the UE receives an HOCmd retx from target cell and do an incorrect RLC-level concatenation
++//  set_scell_activation({0});
++
++  // Freeze all DRBs. SRBs DL are needed for sending the HO Cmd
++  // set_drb_activation(false);
++  for (uint32_t i = 3; i < sched_interface::MAX_LC; i++) {
++    current_sched_ue_cfg.ue_bearers[i].direction = srsenb::sched_interface::ue_bearer_cfg_t::IDLE;
++  }
++  // next_sched_ue_cfg.ue_bearers[0].direction = srsenb::sched_interface::ue_bearer_cfg_t::DL;
++  // next_sched_ue_cfg.ue_bearers[1].direction = srsenb::sched_interface::ue_bearer_cfg_t::DL;
++  // next_sched_ue_cfg.ue_bearers[2].direction = srsenb::sched_interface::ue_bearer_cfg_t::DL;
++
++  parent->rrc_log->info("[ho-debug] rrc::ue::handle_intraenb_ho_cmd, Status of lcid=2, direction=%d\n", 
++    current_sched_ue_cfg.ue_bearers[2].direction);
++
++  // Stop any SRB UL (including SRs)
++  // for (uint32_t i = srb_to_lcid(lte_srb::srb1); i <= srb_to_lcid(lte_srb::srb2); ++i) {
++  //   next_sched_ue_cfg.ue_bearers[i].direction = sched_interface::ue_bearer_cfg_t::DL;
++  // }
++
++  parent->mac->ue_cfg(rnti, &current_sched_ue_cfg);
++  // Acknowledge Dedicated Configuration
++  parent->mac->phy_config_enabled(rnti, false);
++}
++
+ void rrc::ue::apply_setup_phy_common(const asn1::rrc::rr_cfg_common_sib_s& config)
+ {
+   // Return if no cell is supported
+@@ -2350,6 +2669,38 @@ void rrc::ue::apply_setup_phy_common(const asn1::rrc::rr_cfg_common_sib_s& confi
+   }
+ }
+ 
++/*
++ * [ho-impl]
++ */
++void rrc::ue::apply_setup_phy_common(const asn1::rrc::rr_cfg_common_sib_s& config, bool update_phy)
++{
++  // Return if no cell is supported
++  if (phy_rrc_dedicated_list.empty()) {
++    return;
++  }
++
++  // Flatten common configuration
++  auto& current_phy_cfg = phy_rrc_dedicated_list[0].phy_cfg;
++  set_phy_cfg_t_common_prach(&current_phy_cfg, &config.prach_cfg.prach_cfg_info, config.prach_cfg.root_seq_idx);
++  set_phy_cfg_t_common_pdsch(&current_phy_cfg, config.pdsch_cfg_common);
++  set_phy_cfg_t_common_pusch(&current_phy_cfg, config.pusch_cfg_common);
++  set_phy_cfg_t_common_pucch(&current_phy_cfg, config.pucch_cfg_common);
++  set_phy_cfg_t_common_srs(&current_phy_cfg, config.srs_ul_cfg_common);
++  set_phy_cfg_t_common_pwr_ctrl(&current_phy_cfg, config.ul_pwr_ctrl_common);
++
++  // Set PCell index
++  phy_rrc_dedicated_list[0].configured = true;
++  parent->rrc_log->info("[ho-debug] old enb_cc_idx=%u\n", phy_rrc_dedicated_list[0].enb_cc_idx);
++  // phy_rrc_dedicated_list[0].enb_cc_idx = current_sched_ue_cfg.supported_cc_list[0].enb_cc_idx; // [ho-comment]
++  phy_rrc_dedicated_list[0].enb_cc_idx = cell_ded_list.get_ue_cc_idx(UE_PCELL_CC_IDX)->cell_common->enb_cc_idx; // [ho-impl]
++  parent->rrc_log->info("[ho-debug] new enb_cc_idx=%u\n", phy_rrc_dedicated_list[0].enb_cc_idx);
++
++  // Send configuration to physical layer
++  if (parent->phy != nullptr and update_phy) {
++    parent->phy->set_config_dedicated(rnti, phy_rrc_dedicated_list);
++  }
++}
++
+ void rrc::ue::apply_setup_phy_config_dedicated(const asn1::rrc::phys_cfg_ded_s& phys_cfg_ded)
+ {
+   // Return if no cell is supported
+@@ -2409,6 +2760,47 @@ void rrc::ue::apply_reconf_phy_config(const asn1::rrc::rrc_conn_recfg_r8_ies_s&
+   }
+ }
+ 
++/*
++ * ho-impl
++ */
++void rrc::ue::apply_reconf_phy_config(const asn1::rrc::rrc_conn_recfg_r8_ies_s& reconfig_r8, bool update_phy)
++{
++  // Return if no cell is supported
++  if (phy_rrc_dedicated_list.empty()) {
++    return;
++  }
++
++  // Configure PCell if available configuration
++  if (reconfig_r8.rr_cfg_ded_present) {
++    auto& rr_cfg_ded = reconfig_r8.rr_cfg_ded;
++    if (rr_cfg_ded.phys_cfg_ded_present) {
++      auto& phys_cfg_ded = rr_cfg_ded.phys_cfg_ded;
++      srslte::set_phy_cfg_t_dedicated_cfg(&phy_rrc_dedicated_list[0].phy_cfg, phys_cfg_ded);
++    }
++  }
++
++  // Parse extensions
++  if (reconfig_r8.non_crit_ext_present) {
++    auto& reconfig_r890 = reconfig_r8.non_crit_ext;
++    if (reconfig_r890.non_crit_ext_present) {
++      auto& reconfig_r920 = reconfig_r890.non_crit_ext;
++      if (reconfig_r920.non_crit_ext_present) {
++        auto& reconfig_r1020 = reconfig_r920.non_crit_ext;
++
++        // Handle Add/Modify SCell list
++        if (reconfig_r1020.scell_to_add_mod_list_r10_present) {
++          // This is already applied when packing the SCell list
++        }
++      }
++    }
++  }
++
++  // Send configuration to physical layer
++  if (parent->phy != nullptr and update_phy) {
++    parent->phy->set_config_dedicated(rnti, phy_rrc_dedicated_list);
++  }
++}
++
+ int rrc::ue::get_cqi(uint16_t* pmi_idx, uint16_t* n_pucch, uint32_t ue_cc_idx)
+ {
+   cell_ctxt_dedicated* c = cell_ded_list.get_ue_cc_idx(ue_cc_idx);
+diff --git a/srsenb/src/stack/rrc/rrc_cell_cfg.cc b/srsenb/src/stack/rrc/rrc_cell_cfg.cc
+index 0990d5493..8b0093201 100644
+--- a/srsenb/src/stack/rrc/rrc_cell_cfg.cc
++++ b/srsenb/src/stack/rrc/rrc_cell_cfg.cc
+@@ -120,7 +120,8 @@ cell_ctxt_dedicated_list::~cell_ctxt_dedicated_list()
+ cell_ctxt_dedicated* cell_ctxt_dedicated_list::get_enb_cc_idx(uint32_t enb_cc_idx)
+ {
+   auto it = std::find_if(cell_ded_list.begin(), cell_ded_list.end(), [enb_cc_idx](const cell_ctxt_dedicated& c) {
+-    return c.cell_common.enb_cc_idx == enb_cc_idx;
++//    return c.cell_common.enb_cc_idx == enb_cc_idx;
++    return c.cell_common->enb_cc_idx == enb_cc_idx; // [ho-impl]
+   });
+   return it == cell_ded_list.end() ? nullptr : &(*it);
+ }
+@@ -172,6 +173,93 @@ cell_ctxt_dedicated* cell_ctxt_dedicated_list::add_cell(uint32_t enb_cc_idx)
+   return &cell_ded_list.back();
+ }
+ 
++/* [ho-impl] */
++bool cell_ctxt_dedicated_list::set_cells(const std::vector<uint32_t>& enb_cc_idxs)
++{
++  // Remove extra previously allocked cells
++  while (enb_cc_idxs.size() < cell_ded_list.size()) {
++    rem_last_cell(); // [ho-impl] TODO: copy and check this cell
++  }
++  if (cell_ded_list.empty()) {
++    // There were no previous cells allocated. Just add new ones
++    for (auto& cc_idx : enb_cc_idxs) {
++      if (not add_cell(cc_idx)) {
++        return false;
++      }
++    }
++    return true;
++  }
++
++  const cell_info_common* prev_pcell            = cell_ded_list[UE_PCELL_CC_IDX].cell_common;
++  const cell_info_common* new_pcell             = common_list.get_cc_idx(enb_cc_idxs[0]);
++  bool                   pcell_freq_changed    = prev_pcell->cell_cfg.dl_earfcn != new_pcell->cell_cfg.dl_earfcn;
++  uint32_t               prev_pcell_enb_cc_idx = prev_pcell->enb_cc_idx;
++
++  if (pcell_freq_changed) {
++    // Need to clean all allocated resources if PCell earfcn changes
++    while (not cell_ded_list.empty()) {
++      printf("[ho-debug] set_cells: before call rem_last_cell()\n");
++      rem_last_cell();
++    }
++    while (cell_ded_list.size() < enb_cc_idxs.size()) {
++      printf("[ho-debug] set_cells: before add_cell(), from %u to %u\n", prev_pcell_enb_cc_idx, enb_cc_idxs[0]);
++      if (not add_cell(enb_cc_idxs[cell_ded_list.size()])) {
++        return false;
++      }
++    }
++    return true;
++  }
++
++  uint32_t ue_cc_idx = 0;
++  for (; ue_cc_idx < enb_cc_idxs.size(); ++ue_cc_idx) {
++    uint32_t               enb_cc_idx  = enb_cc_idxs[ue_cc_idx];
++    const cell_info_common* cell_common = common_list.get_cc_idx(enb_cc_idx);
++    if (cell_common == nullptr) {
++      printf("cell with enb_cc_idx=%d does not exist.\n", enb_cc_idx);
++      log_h->error("cell with enb_cc_idx=%d does not exist.", enb_cc_idx);
++      break;
++    }
++    auto* prev_cell_common = cell_ded_list[ue_cc_idx].cell_common;
++    if (enb_cc_idx == prev_cell_common->enb_cc_idx) {
++      // Same cell. Do not realloc resources
++      continue;
++    }
++
++    dealloc_cqi_resources(ue_cc_idx);
++    cell_ded_list[ue_cc_idx] = std::move(cell_ctxt_dedicated(ue_cc_idx, *cell_common));
++    if (not alloc_cqi_resources(ue_cc_idx, cfg.cqi_cfg.period)) {
++      printf("Failed to allocate CQI resources for cell ue_cc_idx=%d\n", ue_cc_idx);
++      log_h->error("Failed to allocate CQI resources for cell ue_cc_idx=%d", ue_cc_idx);
++      break;
++    }
++  }
++  // Remove cells after the last successful insertion
++  while (ue_cc_idx < cell_ded_list.size()) {
++    rem_last_cell();
++  }
++  if (cell_ded_list.empty()) {
++    // We failed to allocate new PCell. Fallback to old PCell
++    add_cell(prev_pcell_enb_cc_idx);
++  }
++  return ue_cc_idx == enb_cc_idxs.size();
++}
++
++/* [ho-impl] */
++bool cell_ctxt_dedicated_list::rem_last_cell()
++{
++  if (cell_ded_list.empty()) {
++    return false;
++  }
++  uint32_t ue_cc_idx = cell_ded_list.size() - 1;
++  if (ue_cc_idx == UE_PCELL_CC_IDX) {
++    dealloc_sr_resources();
++    dealloc_pucch_cs_resources();
++  }
++  dealloc_cqi_resources(ue_cc_idx);
++  cell_ded_list.pop_back();
++  return true;
++}
++
+ bool cell_ctxt_dedicated_list::alloc_cqi_resources(uint32_t ue_cc_idx, uint32_t period)
+ {
+   cell_ctxt_dedicated* cell = get_ue_cc_idx(ue_cc_idx);
+@@ -184,7 +272,8 @@ bool cell_ctxt_dedicated_list::alloc_cqi_resources(uint32_t ue_cc_idx, uint32_t
+     return false;
+   }
+ 
+-  const auto& pcell_pucch_cfg   = get_ue_cc_idx(UE_PCELL_CC_IDX)->cell_common.sib2.rr_cfg_common.pucch_cfg_common;
++//  const auto& pcell_pucch_cfg   = get_ue_cc_idx(UE_PCELL_CC_IDX)->cell_common.sib2.rr_cfg_common.pucch_cfg_common;
++  const auto& pcell_pucch_cfg   = get_ue_cc_idx(UE_PCELL_CC_IDX)->cell_common->sib2.rr_cfg_common.pucch_cfg_common; // [ho-impl]
+   uint32_t    c                 = SRSLTE_CP_ISNORM(cfg.cell.cp) ? 3 : 2;
+   uint32_t    delta_pucch_shift = pcell_pucch_cfg.delta_pucch_shift.to_number();
+   delta_pucch_shift             = SRSLTE_MAX(1, delta_pucch_shift);
+@@ -291,7 +380,8 @@ bool cell_ctxt_dedicated_list::alloc_sr_resources(uint32_t period)
+   }
+ 
+   uint32_t c                 = SRSLTE_CP_ISNORM(cfg.cell.cp) ? 3 : 2;
+-  uint32_t delta_pucch_shift = cell->cell_common.sib2.rr_cfg_common.pucch_cfg_common.delta_pucch_shift.to_number();
++//  uint32_t delta_pucch_shift = cell->cell_common.sib2.rr_cfg_common.pucch_cfg_common.delta_pucch_shift.to_number(); //ho-impl
++  uint32_t delta_pucch_shift = cell->cell_common->sib2.rr_cfg_common.pucch_cfg_common.delta_pucch_shift.to_number(); // ho-impl
+   delta_pucch_shift          = SRSLTE_MAX(1, delta_pucch_shift); // prevent div by zero
+   uint32_t max_users         = 12 * c / delta_pucch_shift;
+ 
+@@ -327,8 +417,13 @@ bool cell_ctxt_dedicated_list::alloc_sr_resources(uint32_t period)
+ 
+   // Compute N_pucch_sr
+   sr_res.sr_N_pucch = i_min * max_users + pucch_res->sr_sched.nof_users[i_min][j_min];
++  /* ho-impl
+   if (cell->cell_common.sib2.rr_cfg_common.pucch_cfg_common.ncs_an) {
+     sr_res.sr_N_pucch += cell->cell_common.sib2.rr_cfg_common.pucch_cfg_common.ncs_an;
++  } */
++  // ho-impl
++  if (cell->cell_common->sib2.rr_cfg_common.pucch_cfg_common.ncs_an) {
++    sr_res.sr_N_pucch += cell->cell_common->sib2.rr_cfg_common.pucch_cfg_common.ncs_an;
+   }
+ 
+   // Allocate user
+@@ -370,7 +465,8 @@ bool cell_ctxt_dedicated_list::alloc_pucch_cs_resources()
+     return false;
+   }
+ 
+-  const sib_type2_s& sib2      = cell->cell_common.sib2;
++//  const sib_type2_s& sib2      = cell->cell_common.sib2; // ho-impl
++  const sib_type2_s& sib2      = cell->cell_common->sib2; // ho-impl
+   const uint16_t     N_pucch_1 = sib2.rr_cfg_common.pucch_cfg_common.n1_pucch_an;
+   const uint32_t     max_cce   = srslte_max_cce(cfg.cell.nof_prb);
+   // Loop through all available resources
+diff --git a/srsenb/src/stack/rrc/rrc_mobility.cc b/srsenb/src/stack/rrc/rrc_mobility.cc
+index 305547524..a7675c3e3 100644
+--- a/srsenb/src/stack/rrc/rrc_mobility.cc
++++ b/srsenb/src/stack/rrc/rrc_mobility.cc
+@@ -701,6 +701,76 @@ rrc::ue::rrc_mobility::rrc_mobility(rrc::ue* outer_ue) :
+   ue_var_meas(std::make_shared<var_meas_cfg_t>())
+ {}
+ 
++/*
++ * ho-impl
++ */
++void rrc::ue::rrc_mobility::fill_mobility_reconf_common(asn1::rrc::dl_dcch_msg_s& msg,
++                                                        const cell_info_common&   target_cell,
++                                                        uint32_t                  src_dl_earfcn,
++                                                        uint32_t                  src_pci)
++{
++  auto& recfg              = msg.msg.set_c1().set_rrc_conn_recfg();
++  recfg.rrc_transaction_id = rrc_ue->transaction_id;
++  rrc_ue->transaction_id   = (rrc_ue->transaction_id + 1) % 4;
++  auto& recfg_r8           = recfg.crit_exts.set_c1().set_rrc_conn_recfg_r8();
++
++  // Pack MobilityControlInfo message with params of target Cell
++  recfg_r8.mob_ctrl_info_present = true;
++  auto& mob_info                 = recfg_r8.mob_ctrl_info;
++  mob_info.target_pci            = target_cell.cell_cfg.pci;
++  mob_info.t304.value            = mob_ctrl_info_s::t304_opts::ms2000;
++  mob_info.new_ue_id.from_number(rrc_ue->rnti);
++
++  mob_info.carrier_freq_present                 = false; // same frequency handover for now
++  asn1::number_to_enum(mob_info.carrier_bw.dl_bw, target_cell.mib.dl_bw.to_number());
++  if (target_cell.cell_cfg.dl_earfcn != src_dl_earfcn) {
++    mob_info.carrier_freq_present         = true;
++    mob_info.carrier_freq.dl_carrier_freq = target_cell.cell_cfg.dl_earfcn;
++    mob_info.carrier_bw_present = true; // [ho-impl]
++    Info("[ho-debug] Set mob_info.carrier_bw.dl_bw=%s\n", mob_info.carrier_bw.dl_bw.to_string().c_str());
++  }
++  
++  // ho-impl
++  mob_info.rr_cfg_common.rach_cfg_common_present  = true;
++  mob_info.rr_cfg_common.rach_cfg_common          = target_cell.sib2.rr_cfg_common.rach_cfg_common;
++
++  mob_info.rr_cfg_common.pusch_cfg_common         = target_cell.sib2.rr_cfg_common.pusch_cfg_common;
++
++  mob_info.rr_cfg_common.prach_cfg.root_seq_idx   = target_cell.sib2.rr_cfg_common.prach_cfg.root_seq_idx; // prach-Config
++  mob_info.rr_cfg_common.prach_cfg.prach_cfg_info_present = true; // ho-impl
++  mob_info.rr_cfg_common.prach_cfg.prach_cfg_info = target_cell.sib2.rr_cfg_common.prach_cfg.prach_cfg_info; // ho-impl
++
++  // ho-impl
++  mob_info.rr_cfg_common.pdsch_cfg_common_present   = true;
++  mob_info.rr_cfg_common.pdsch_cfg_common           = target_cell.sib2.rr_cfg_common.pdsch_cfg_common;
++
++  // ho-impl
++  mob_info.rr_cfg_common.phich_cfg_present          = true;
++  mob_info.rr_cfg_common.phich_cfg                  = target_cell.mib.phich_cfg;
++
++  // ho-impl
++  mob_info.rr_cfg_common.pucch_cfg_common_present   = true;
++  mob_info.rr_cfg_common.pucch_cfg_common           = target_cell.sib2.rr_cfg_common.pucch_cfg_common;
++
++  // ho-impl
++  mob_info.rr_cfg_common.ul_pwr_ctrl_common_present = true;
++  mob_info.rr_cfg_common.ul_pwr_ctrl_common         = target_cell.sib2.rr_cfg_common.ul_pwr_ctrl_common;
++
++  mob_info.rr_cfg_common.ul_cp_len                  = target_cell.sib2.rr_cfg_common.ul_cp_len;
++  mob_info.rr_cfg_common.p_max_present              = true;
++  mob_info.rr_cfg_common.p_max                      = rrc_enb->cfg.sib1.p_max;
++
++  // Set security cfg
++  recfg_r8.security_cfg_ho_present        = true;
++  auto& intralte                          = recfg_r8.security_cfg_ho.handov_type.set_intra_lte();
++  intralte.security_algorithm_cfg_present = false;
++  intralte.key_change_ind                 = false;
++  intralte.next_hop_chaining_count        = 0; 
++
++  // TODO: add the function apply_reconf_updates
++  rrc_ue->fill_reconf_updates(recfg_r8); // cmd can be received, if removed
++}
++
+ //! Method to add Mobility Info to a RRC Connection Reconfiguration Message
+ bool rrc::ue::rrc_mobility::fill_conn_recfg_msg(asn1::rrc::rrc_conn_recfg_r8_ies_s* conn_recfg)
+ {
+@@ -985,6 +1055,135 @@ bool rrc::ue::rrc_mobility::start_enb_status_transfer()
+   return rrc_enb->s1ap->send_enb_status_transfer_proc(rrc_ue->rnti, bearer_list);
+ }
+ 
++/*
++ * [ho-impl] Entrance
++ * [ho-impl] Intra-eNB handover
++ */
++void rrc::ue::rrc_mobility::start_intra_enb_ho()
++{
++  printf("[ho-debug] rrc_mobility: handle_intraenb_handover\n");
++
++  uint32_t pcell_id = rrc_ue->get_ue_cc_cfg(UE_PCELL_CC_IDX)->cell_cfg.cell_id;
++
++  printf("[ho-debug] : rrc_enb->cfg.cell_list.size %lu\n", rrc_enb->cfg.cell_list.size());
++
++  uint32_t target_eci = 0;
++
++  for (auto cell_cfg = rrc_enb->cfg.cell_list.begin(); cell_cfg != rrc_enb->cfg.cell_list.end(); cell_cfg++) {
++    if (cell_cfg->cell_id == pcell_id) {
++      continue;
++    }
++    uint32_t neighbor_cell_id = cell_cfg->cell_id;
++    target_eci = (rrc_enb->cfg.enb_id << 8u) + neighbor_cell_id;
++    printf("[ho-debug] current pci: %u, next pci: %u\n", pcell_id, neighbor_cell_id);
++    break;
++  }
++
++  if (target_eci == 0) {
++    printf("[ho-debug] Error: zero eci.\n");
++  }
++
++  uint32_t cell_id = rrc_details::eci_to_cellid(target_eci);
++  target_cell_     = rrc_enb->cell_common_list->get_cell_id(cell_id);
++  source_cell_     = rrc_ue->cell_ded_list.get_ue_cc_idx(UE_PCELL_CC_IDX)->cell_common;
++  if (target_cell_ == nullptr) {
++    printf("[ho-debug] Error: The target cell_id=0x%x was not found in the list of eNB cells", cell_id);
++    return;
++  }
++
++  Info("Starting intraeNB Handover of rnti=0x%x to 0x%x.", rrc_ue->rnti, target_eci);
++  printf("Starting intraeNB Handover of rnti=0x%x to 0x%x.", rrc_ue->rnti, target_eci);
++
++  last_temp_crnti = SRSLTE_INVALID_RNTI; // TODO: move the declaration and implementation to rrc_mobility
++
++  /* Allocate Resources in Target Cell */
++  // cell_ctxt_dedicated_list cell_ded_list;
++   if (not rrc_ue->cell_ded_list.set_cells({target_cell_->enb_cc_idx})) {
++     printf("[ho-debug] Error: set_cells\n");
++     return;
++   }
++  // rrc_ue->update_scells();
++
++  /* Prepare RRC Reconf Message with mobility info */
++  dl_dcch_msg_s dl_dcch_msg;
++  fill_mobility_reconf_common(dl_dcch_msg, *target_cell_, source_cell_->cell_cfg.dl_earfcn, source_cell_->cell_cfg.pci);
++  rrc_conn_recfg_r8_ies_s& reconf_r8 = dl_dcch_msg.msg.c1().rrc_conn_recfg().crit_exts.c1().rrc_conn_recfg_r8();
++
++  // Apply changes to the MAC scheduler
++  printf("[ho-debug] handle_intraenb_ho_cmd\n");
++  rrc_ue->handle_intraenb_ho_cmd(reconf_r8); // [ho-impl] TODO: with bugs; after enable this line, HO cmd cannot be delivered
++//
++  printf("[ho-debug] apply_setup_phy_common\n");
++  rrc_ue->apply_setup_phy_common(rrc_enb->cfg.sibs[1].sib2().rr_cfg_common, false); // done: define a apply_setup_phy_common with two params
++  printf("[ho-debug] apply_reconf_phy_config\n");
++  rrc_ue->apply_reconf_phy_config(reconf_r8, false); // done: define a apply_reconf_phy_config with two params
++
++  handover_running = true;
++
++  // debugging before sending out msg
++  uint32_t lcid =
++      rrc_enb->rlc->has_bearer(rrc_ue->rnti, RB_ID_SRB2) && rrc_ue->state == RRC_STATE_REGISTERED ? RB_ID_SRB2 : RB_ID_SRB1;
++
++  printf("SRB%d - rnti=0x%x\n", lcid, rrc_ue->rnti);
++
++  asn1::json_writer json_writer;
++  dl_dcch_msg.to_json(json_writer);
++  rrc_enb->rrc_log->debug_long("[ho-debug] Content:\n%s\n", json_writer.to_string().c_str());
++  // printf("[ho-debug] Content:\n%s\n", json_writer.to_string().c_str());
++
++  // Send DL-DCCH Message via current PCell
++  rrc_ue->send_dl_dcch(&dl_dcch_msg);
++  printf("[ho-debug] Send out handover command.\n");
++}
++
++bool rrc::ue::rrc_mobility::is_ho_running()
++{
++  return handover_running;
++}
++
++void rrc::ue::rrc_mobility::set_ho_stop()
++{
++  handover_running = false;
++}
++
++bool rrc::ue::rrc_mobility::is_ho_performed()
++{
++  return handover_performed;
++}
++
++void rrc::ue::rrc_mobility::set_ho_performed()
++{
++  handover_performed = true;
++}
++
++void rrc::ue::rrc_mobility::handle_crnti_ce(uint16_t old_rnti, uint16_t new_rnti)
++{
++  Info("UE performing handover updated its temp-crnti=0x%x to rnti=0x%x", new_rnti, old_rnti);
++  bool is_first_crnti_ce = last_temp_crnti == SRSLTE_INVALID_RNTI;
++  last_temp_crnti      = new_rnti;
++
++  if (is_first_crnti_ce) {
++    // Need to reset SNs of bearers.
++    rrc_enb->rlc->reestablish(rrc_ue->rnti);
++    rrc_enb->pdcp->reestablish(rrc_ue->rnti);
++
++    // Change PCell in MAC/Scheduler
++    rrc_ue->handle_crnti_ce(new_rnti);
++
++    // finally apply new phy changes
++    rrc_enb->phy->set_config_dedicated(rrc_ue->rnti, rrc_ue->phy_rrc_dedicated_list);
++
++    rrc_ue->regenerate_keys_handover(target_cell_->cell_cfg.pci, target_cell_->cell_cfg.dl_earfcn);
++    rrc_ue->apply_pdcp_srb_updates();
++    rrc_ue->apply_pdcp_drb_updates();
++
++    // // Send PDCP status report if necessary
++    // rrc_enb->pdcp->send_status_report(rrc_ue->rnti);
++  } else {
++    Info("Received duplicate C-RNTI CE during rnti=0x%x handover.", rrc_ue->rnti);
++  }
++}
++
+ /*************************************************************************************************
+  *                                  sourceenb_ho_proc_t class
+  ************************************************************************************************/
+diff --git a/srsenb/src/stack/upper/pdcp.cc b/srsenb/src/stack/upper/pdcp.cc
+index bf9a942bb..22c2e2809 100644
+--- a/srsenb/src/stack/upper/pdcp.cc
++++ b/srsenb/src/stack/upper/pdcp.cc
+@@ -126,6 +126,14 @@ bool pdcp::get_bearer_status(uint16_t  rnti,
+   return users[rnti].pdcp->get_bearer_status(lcid, dlsn, dlhfn, ulsn, ulhfn);
+ }
+ 
++void pdcp::reestablish(uint16_t rnti)
++{
++  if (users.count(rnti) == 0) {
++    return;
++  }
++  users[rnti].pdcp->reestablish();
++}
++
+ void pdcp::write_pdu(uint16_t rnti, uint32_t lcid, srslte::unique_byte_buffer_t sdu)
+ {
+   if (users.count(rnti)) {
+diff --git a/srsenb/src/stack/upper/rlc.cc b/srsenb/src/stack/upper/rlc.cc
+index e3e3075d1..071070980 100644
+--- a/srsenb/src/stack/upper/rlc.cc
++++ b/srsenb/src/stack/upper/rlc.cc
+@@ -145,6 +145,15 @@ bool rlc::resume_bearer(uint16_t rnti, uint32_t lcid)
+   return result;
+ }
+ 
++void rlc::reestablish(uint16_t rnti)
++{
++  pthread_rwlock_rdlock(&rwlock);
++  if (users.count(rnti)) {
++    users[rnti].rlc->reestablish();
++  }
++  pthread_rwlock_unlock(&rwlock);
++}
++
+ void rlc::read_pdu_pcch(uint8_t* payload, uint32_t buffer_size)
+ {
+   rrc->read_pdu_pcch(payload, buffer_size);
