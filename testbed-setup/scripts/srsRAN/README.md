@@ -1,6 +1,5 @@
 # Release v2.0: Carrier Aggregation and Handover 
 
-## Introduction
 In this release, two features are added for 4G/5G mobility support:
 - Carrier aggregation
 - Intra-eNodeB handover
@@ -32,7 +31,7 @@ Edit the configuration files properly to connect eNB to EPC, authenticate the UE
 * Edit both ``~/.config/srslte/enb.conf`` and ``~/.config/srslte/epc.conf configure``: configure fields ``mcc,mnc`` and make sure they are consistent in two files.
 * Edit ``~/.config/srslte/enb.conf``: configure the bandwidth of one cell to 5MHz by using the following line (replacing the original value if any):
 ```
-n_prb = 25
+  n_prb = 25
 ```
 * To access the Internet, one has to [configure APN](https://docs.srsran.com/en/latest/app_notes/source/cots_ue/source/index.html#adding-an-apn) on both the UE and eNB and [run masquerading script](https://docs.srsran.com/en/latest/app_notes/source/cots_ue/source/index.html#run-masquerading-script).
 
@@ -104,4 +103,5 @@ If handover happens and the device successfully switches to another cell, you wi
 ```
 
 ###Demo
+
 The [demo video](https://youtu.be/-R5dfjVLfeQ) shows the experience of running intra-eNB handover on Google Pixel.
