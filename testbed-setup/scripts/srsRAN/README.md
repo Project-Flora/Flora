@@ -73,10 +73,12 @@ On Ubuntu 18.04, run the all-in-one script to install and build the project:
   [Flora/testbed-setup/scripts/srsRAN]$ ./install_handover.sh
 ```
 
-###Configuration
+### Configuration
+
 Same as the above configuration for carrier aggregation.
 
-###Execution
+### Execution
+
 Run srsENB and srsEPC on the same machine.
 
 __srsEPC__: Open one terminal and run the EPC:
@@ -102,6 +104,6 @@ If handover happens and the device successfully switches to another cell, you wi
   User 0x46 connected
 ```
 
-###Demo
+### Demo
 
 The [demo video](https://youtu.be/-R5dfjVLfeQ) shows the experience of running intra-eNB handover on Google Pixel.
