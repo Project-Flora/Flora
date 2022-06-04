@@ -3,6 +3,7 @@
 In this release, two features are added for 4G/5G mobility support:
 - Carrier aggregation
 - Intra-eNodeB handover
+
 Both features are supported for commodity phones.
 
 ## Hardware
