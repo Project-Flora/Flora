@@ -18,6 +18,19 @@ index 5a1193e1a..af8bc8334 100644
  };
  
  // PDCP interface for RLC
+diff --git a/lib/include/srslte/interfaces/enb_rrc_interface_types.h b/lib/include/srslte/interfaces/enb_rrc_interface_types.h
+index 0608cd6fe..4c345a0e5 100644
+--- a/lib/include/srslte/interfaces/enb_rrc_interface_types.h
++++ b/lib/include/srslte/interfaces/enb_rrc_interface_types.h
+@@ -69,6 +69,8 @@ struct cell_cfg_t {
+ 
+ typedef std::vector<cell_cfg_t> cell_list_t;
+ 
++typedef std::vector<asn1::rrc::report_cfg_eutra_s> vcell_list_t; /* flora-handover */
++
+ } // namespace srsenb
+ 
+ #endif // SRSLTE_ENB_RRC_INTERFACE_TYPES_H
 diff --git a/srsenb/hdr/stack/rrc/rrc.h b/srsenb/hdr/stack/rrc/rrc.h
 index 39158a401..ed6972332 100644
 --- a/srsenb/hdr/stack/rrc/rrc.h
@@ -90,7 +103,7 @@ index 39158a401..ed6972332 100644
  
    // args
 diff --git a/srsenb/hdr/stack/rrc/rrc_cell_cfg.h b/srsenb/hdr/stack/rrc/rrc_cell_cfg.h
-index 1840ea05b..72fabe678 100644
+index 1840ea05b..4ed05aa2b 100644
 --- a/srsenb/hdr/stack/rrc/rrc_cell_cfg.h
 +++ b/srsenb/hdr/stack/rrc/rrc_cell_cfg.h
 @@ -85,7 +85,8 @@ private:
@@ -119,26 +132,37 @@ index 1840ea05b..72fabe678 100644
  };
  
  /** Class used to handle the allocation of a UE's resources across its cells */
-@@ -113,6 +116,10 @@ public:
+@@ -113,6 +116,8 @@ public:
    ~cell_ctxt_dedicated_list();
  
    cell_ctxt_dedicated* add_cell(uint32_t enb_cc_idx);
-+  // TODO: ho bool                 set_cells(const std::vector<uint32_t>& enb_cc_idxs);
-+  // TODO: ho bool                 rem_last_cell(); 
 +  bool         rem_last_cell();
 +  bool         set_cells(const std::vector<uint32_t>& enb_cc_idxs);
  
    cell_ctxt_dedicated* get_ue_cc_idx(uint32_t ue_cc_idx)
    {
+diff --git a/srsenb/hdr/stack/rrc/rrc_config.h b/srsenb/hdr/stack/rrc/rrc_config.h
+index 393cd04e7..96744dbd7 100644
+--- a/srsenb/hdr/stack/rrc/rrc_config.h
++++ b/srsenb/hdr/stack/rrc/rrc_config.h
+@@ -79,6 +79,7 @@ struct rrc_cfg_t {
+   bool                                meas_cfg_present = false;
+   srslte_cell_t                       cell;
+   cell_list_t                         cell_list;
++  vcell_list_t                        vcell_list; /* flora-handover */
+ };
+ 
+ constexpr uint32_t UE_PCELL_CC_IDX = 0;
 diff --git a/srsenb/hdr/stack/rrc/rrc_mobility.h b/srsenb/hdr/stack/rrc/rrc_mobility.h
-index 5e2bb6d1e..9655d9824 100644
+index 5e2bb6d1e..599df8010 100644
 --- a/srsenb/hdr/stack/rrc/rrc_mobility.h
 +++ b/srsenb/hdr/stack/rrc/rrc_mobility.h
-@@ -95,6 +95,12 @@ public:
+@@ -95,6 +95,13 @@ public:
    bool fill_conn_recfg_msg(asn1::rrc::rrc_conn_recfg_r8_ies_s* conn_recfg);
    void handle_ue_meas_report(const asn1::rrc::meas_report_s& msg);
    void handle_ho_preparation_complete(bool is_success, srslte::unique_byte_buffer_t container);
 +  void start_intra_enb_ho(); // [ho-impl]
++  void load_vcell(srsenb::cell_cfg_t* cell_cfg_); // flora-ho-vcell
 +  void handle_crnti_ce(uint16_t old_rnti, uint16_t new_rnti); // ho-impl
 +  bool is_ho_running(); // ho-impl
 +  void set_ho_stop(); // ho-impl
@@ -147,7 +171,7 @@ index 5e2bb6d1e..9655d9824 100644
  
  private:
    enum class ho_interface_t { S1, X2, interSector };
-@@ -102,6 +108,11 @@ private:
+@@ -102,6 +109,11 @@ private:
    bool start_ho_preparation(uint32_t target_eci, uint8_t measobj_id, bool fwd_direct_path_available);
    bool start_enb_status_transfer();
  
@@ -159,7 +183,7 @@ index 5e2bb6d1e..9655d9824 100644
    bool update_ue_var_meas_cfg(const asn1::rrc::meas_cfg_s& source_meas_cfg,
                                uint32_t                     target_enb_cc_idx,
                                asn1::rrc::meas_cfg_s*       diff_meas_cfg);
-@@ -114,10 +125,16 @@ private:
+@@ -114,10 +126,16 @@ private:
    rrc::enb_mobility_handler* cfg     = nullptr;
    srslte::byte_buffer_pool*  pool    = nullptr;
    srslte::log_ref            rrc_log;
@@ -200,6 +224,136 @@ index e3b3f2548..1ec290131 100644
  
    // rlc_interface_pdcp
    void        write_sdu(uint16_t rnti, uint32_t lcid, srslte::unique_byte_buffer_t sdu);
+diff --git a/srsenb/src/enb.cc b/srsenb/src/enb.cc
+index 395417cb9..ba38369a3 100644
+--- a/srsenb/src/enb.cc
++++ b/srsenb/src/enb.cc
+@@ -56,6 +56,17 @@ int enb::init(const all_args_t& args_, srslte::logger* logger_)
+     return SRSLTE_ERROR;
+   }
+ 
++  /* Testing for flora-handover */
++  printf("[ho-debug] Vcell num = %lu\n", rrc_cfg.vcell_list.size());
++//  for (int i = 0; i < 2; i++) {
++//    rrc_cfg.cell_list[i].meas_cfg.meas_reports.resize(1);
++//    auto &meas_conf = rrc_cfg.cell_list[i].meas_cfg.meas_reports[0];
++//    meas_conf = rrc_cfg.vcell_list[i];
++//    auto& event = meas_conf.trigger_type.event();
++//    auto& event_org = rrc_cfg.vcell_list[i].trigger_type.event();
++//    printf("[ho-debug] cell=%d, meas_conf=%d, target_conf=%d\n", i, event.event_id.event_a3().a3_offset, event_org.event_id.event_a3().a3_offset);
++//  }
++
+   pool_log.init("POOL", logger);
+   pool_log.set_level(srslte::LOG_LEVEL_ERROR);
+   pool->set_log(&pool_log);
+diff --git a/srsenb/src/enb_cfg_parser.cc b/srsenb/src/enb_cfg_parser.cc
+index 97c993bd6..6cc4f3eb1 100644
+--- a/srsenb/src/enb_cfg_parser.cc
++++ b/srsenb/src/enb_cfg_parser.cc
+@@ -652,11 +652,16 @@ int parse_rr(all_args_t* args_, rrc_cfg_t* rrc_cfg_)
+   rrc_cnfg.set_optional(&rrc_cfg_->meas_cfg_present);
+   rrc_cnfg.add_field(new rr_sections::cell_list_section(args_, rrc_cfg_));
+ 
++  /* flora-handover */ 
++  parser::section virtual_cells("vcell_list");
++  virtual_cells.add_field(new rr_sections::vcell_list_section(args_, rrc_cfg_));
++
+   // Run parser with two sections
+   parser p(args_->enb_files.rr_config);
+   p.add_section(&mac_cnfg);
+   p.add_section(&phy_cfg_);
+   p.add_section(&rrc_cnfg);
++  p.add_section(&virtual_cells);
+ 
+   return p.parse();
+ }
+@@ -678,6 +683,27 @@ static int parse_meas_cell_list(rrc_meas_cfg_t* meas_cfg, Setting& root)
+   return 0;
+ }
+ 
++/* flora-handover */
++static int parse_meas_report_desc_only(asn1::rrc::report_cfg_eutra_s* meas_item, Setting& root)
++{
++  // NOTE: For now, only support one meas_report for all cells.
++  // TODO: for a1
++  // TODO: for a2
++  // meas report parsing
++  HANDLEPARSERCODE(asn1_parsers::str_to_enum(meas_item->trigger_quant, root["a3_report_type"]));
++  auto& event                                   = meas_item->trigger_type.set_event();
++  event.event_id.set_event_a3().report_on_leave = false;
++  event.event_id.event_a3().a3_offset           = (int)root["a3_offset"];
++  event.hysteresis                              = (int)root["a3_hysteresis"];
++  meas_item->max_report_cells                    = 1;                                           // TODO: parse
++  meas_item->report_amount.value                 = report_cfg_eutra_s::report_amount_e_::r1;    // TODO: parse
++  meas_item->report_interv.value                 = report_interv_e::ms120;                      // TODO: parse
++  meas_item->report_quant.value                  = report_cfg_eutra_s::report_quant_opts::both; // TODO: parse
++  HANDLEPARSERCODE(asn1_parsers::number_to_enum(event.time_to_trigger, root["a3_time_to_trigger"]));
++
++  return SRSLTE_SUCCESS;
++}
++
+ static int parse_meas_report_desc(rrc_meas_cfg_t* meas_cfg, Setting& root)
+ {
+   // NOTE: For now, only support one meas_report for all cells.
+@@ -723,6 +749,18 @@ static int parse_scell_list(cell_cfg_t& cell_cfg, Setting& cellroot)
+   return SRSLTE_SUCCESS;
+ }
+ 
++/* [handover] virtual cells loading */
++static int parse_vcell_list(all_args_t* args, rrc_cfg_t* rrc_cfg, Setting& root)
++{
++  rrc_cfg->vcell_list.resize(root.getLength());
++  for (uint32_t n = 0; n < rrc_cfg->vcell_list.size(); ++n) {
++    auto& cell_cfg = rrc_cfg->vcell_list[n];
++    HANDLEPARSERCODE(parse_meas_report_desc_only(&cell_cfg, root[n]));
++  }
++
++  return SRSLTE_SUCCESS;
++}
++
+ static int parse_cell_list(all_args_t* args, rrc_cfg_t* rrc_cfg, Setting& root)
+ {
+   rrc_cfg->cell_list.resize(root.getLength());
+@@ -775,6 +813,13 @@ int cell_list_section::parse(libconfig::Setting& root)
+   return 0;
+ }
+ 
++/* flora-handover */
++int vcell_list_section::parse(libconfig::Setting& root)
++{
++  HANDLEPARSERCODE(parse_vcell_list(args, rrc_cfg, root));
++  return 0;
++}
++
+ } // namespace rr_sections
+ 
+ namespace enb_conf_sections {
+diff --git a/srsenb/src/enb_cfg_parser.h b/srsenb/src/enb_cfg_parser.h
+index 706cd5b65..fc3a12101 100644
+--- a/srsenb/src/enb_cfg_parser.h
++++ b/srsenb/src/enb_cfg_parser.h
+@@ -91,6 +91,21 @@ private:
+   all_args_t* args;
+ };
+ 
++// /* flora-handover */ virtual_cells
++class vcell_list_section final : public parser::field_itf
++{
++public:
++  explicit vcell_list_section(all_args_t* all_args_, rrc_cfg_t* rrc_cfg_) : args(all_args_), rrc_cfg(rrc_cfg_) {}
++
++  int parse(Setting& root) override;
++
++  const char* get_name() override { return "vcell_list"; }
++
++private:
++  rrc_cfg_t*  rrc_cfg;
++  all_args_t* args;
++};
++
+ } // namespace rr_sections
+ 
+ class field_sched_info final : public parser::field_itf
 diff --git a/srsenb/src/stack/mac/mac.cc b/srsenb/src/stack/mac/mac.cc
 index 6846883d8..0d5a0f40c 100644
 --- a/srsenb/src/stack/mac/mac.cc
@@ -311,7 +465,7 @@ index eb6c6879c..dfea7d927 100644
          rrc->upd_user(rnti, old_rnti);
          rnti = old_rnti;
 diff --git a/srsenb/src/stack/rrc/rrc.cc b/srsenb/src/stack/rrc/rrc.cc
-index d754dda44..069a30ea6 100644
+index d754dda44..7b988156c 100644
 --- a/srsenb/src/stack/rrc/rrc.cc
 +++ b/srsenb/src/stack/rrc/rrc.cc
 @@ -218,10 +218,16 @@ void rrc::upd_user(uint16_t new_rnti, uint16_t old_rnti)
@@ -362,7 +516,7 @@ index d754dda44..069a30ea6 100644
 +// [ho-impl]
 +void rrc::ue::set_handover_timeout()
 +{
-+  uint32_t deadline_s  = 3;
++  uint32_t deadline_s  = 10;
 +  uint32_t deadline_ms = 0;
 +
 +  uint32_t deadline = deadline_s * 1e3 + deadline_ms;
@@ -374,22 +528,23 @@ index d754dda44..069a30ea6 100644
  void rrc::ue::set_activity()
  {
    // re-start activity timer with current timeout value
-@@ -1136,6 +1171,14 @@ void rrc::ue::parse_ul_dcch(uint32_t lcid, srslte::unique_byte_buffer_t pdu)
+@@ -1136,6 +1171,15 @@ void rrc::ue::parse_ul_dcch(uint32_t lcid, srslte::unique_byte_buffer_t pdu)
        parent->rrc_log->console("User 0x%x connected\n", rnti);
        state = RRC_STATE_REGISTERED;
        set_activity_timeout(UE_INACTIVITY_TIMEOUT);
 +      if (mobility_handler->is_ho_running()) {
 +        mobility_handler->set_ho_stop();
-+        mobility_handler->set_ho_performed();
++        // mobility_handler->set_ho_performed();
 +      }
-+      if (not mobility_handler->is_ho_performed()) {
-+        printf("[ho-debug] rrc_ue: set timers\n"); // [ho-debug]
-+        set_handover_timeout();
-+      }
++      // if (not mobility_handler->is_ho_performed()) {
++      //   printf("[ho-debug] rrc_ue: set timers\n");
++      //   set_handover_timeout();
++      // }
++      set_handover_timeout();
        break;
      case ul_dcch_msg_type_c::c1_c_::types::security_mode_complete:
        handle_security_mode_complete(&ul_dcch_msg.msg.c1().security_mode_complete());
-@@ -1244,7 +1287,7 @@ void rrc::ue::handle_rrc_reconf_complete(rrc_conn_recfg_complete_s* msg, srslte:
+@@ -1244,7 +1288,7 @@ void rrc::ue::handle_rrc_reconf_complete(rrc_conn_recfg_complete_s* msg, srslte:
          list.resize(ue_cc_idx + 1);
        }
        list[ue_cc_idx].active     = true;
@@ -398,7 +553,7 @@ index d754dda44..069a30ea6 100644
      }
      parent->mac->ue_cfg(rnti, &current_sched_ue_cfg);
  
-@@ -1253,12 +1296,15 @@ void rrc::ue::handle_rrc_reconf_complete(rrc_conn_recfg_complete_s* msg, srslte:
+@@ -1253,12 +1297,15 @@ void rrc::ue::handle_rrc_reconf_complete(rrc_conn_recfg_complete_s* msg, srslte:
      bearer_cfg.direction                                = srsenb::sched_interface::ue_bearer_cfg_t::BOTH;
      bearer_cfg.group                                    = 0;
      parent->mac->bearer_ue_cfg(rnti, 2, &bearer_cfg);
@@ -414,7 +569,7 @@ index d754dda44..069a30ea6 100644
      }
  
      // Acknowledge Dedicated Configuration
-@@ -1317,6 +1363,60 @@ void rrc::ue::set_bitrates(const asn1::s1ap::ue_aggregate_maximum_bitrate_s& rat
+@@ -1317,6 +1364,60 @@ void rrc::ue::set_bitrates(const asn1::s1ap::ue_aggregate_maximum_bitrate_s& rat
    bitrates = rates;
  }
  
@@ -475,7 +630,7 @@ index d754dda44..069a30ea6 100644
  void rrc::ue::set_security_capabilities(const asn1::s1ap::ue_security_cap_s& caps)
  {
    security_capabilities = caps;
-@@ -1933,7 +2033,7 @@ int rrc::ue::fill_scell_to_addmod_list(asn1::rrc::rrc_conn_recfg_r8_ies_s* conn_
+@@ -1933,7 +2034,7 @@ int rrc::ue::fill_scell_to_addmod_list(asn1::rrc::rrc_conn_recfg_r8_ies_s* conn_
        continue;
      }
      uint32_t                scell_idx = p.ue_cc_idx;
@@ -484,7 +639,7 @@ index d754dda44..069a30ea6 100644
      const sib_type1_s&      cell_sib1 = cc_cfg->sib1;
      const sib_type2_s&      cell_sib2 = cc_cfg->sib2;
  
-@@ -2324,6 +2424,225 @@ void rrc::ue::send_dl_dcch(dl_dcch_msg_s* dl_dcch_msg, srslte::unique_byte_buffe
+@@ -2324,6 +2425,225 @@ void rrc::ue::send_dl_dcch(dl_dcch_msg_s* dl_dcch_msg, srslte::unique_byte_buffe
    }
  }
  
@@ -710,7 +865,7 @@ index d754dda44..069a30ea6 100644
  void rrc::ue::apply_setup_phy_common(const asn1::rrc::rr_cfg_common_sib_s& config)
  {
    // Return if no cell is supported
-@@ -2350,6 +2669,38 @@ void rrc::ue::apply_setup_phy_common(const asn1::rrc::rr_cfg_common_sib_s& confi
+@@ -2350,6 +2670,38 @@ void rrc::ue::apply_setup_phy_common(const asn1::rrc::rr_cfg_common_sib_s& confi
    }
  }
  
@@ -749,7 +904,7 @@ index d754dda44..069a30ea6 100644
  void rrc::ue::apply_setup_phy_config_dedicated(const asn1::rrc::phys_cfg_ded_s& phys_cfg_ded)
  {
    // Return if no cell is supported
-@@ -2409,6 +2760,47 @@ void rrc::ue::apply_reconf_phy_config(const asn1::rrc::rrc_conn_recfg_r8_ies_s&
+@@ -2409,6 +2761,47 @@ void rrc::ue::apply_reconf_phy_config(const asn1::rrc::rrc_conn_recfg_r8_ies_s&
    }
  }
  
@@ -950,10 +1105,18 @@ index 0990d5493..8b0093201 100644
    const uint32_t     max_cce   = srslte_max_cce(cfg.cell.nof_prb);
    // Loop through all available resources
 diff --git a/srsenb/src/stack/rrc/rrc_mobility.cc b/srsenb/src/stack/rrc/rrc_mobility.cc
-index 305547524..a7675c3e3 100644
+index 305547524..750001887 100644
 --- a/srsenb/src/stack/rrc/rrc_mobility.cc
 +++ b/srsenb/src/stack/rrc/rrc_mobility.cc
-@@ -701,6 +701,76 @@ rrc::ue::rrc_mobility::rrc_mobility(rrc::ue* outer_ue) :
+@@ -28,6 +28,7 @@
+ #include <cstdio>
+ #include <cstring>
+ #include <functional>
++#include <time.h>
+ 
+ namespace srsenb {
+ 
+@@ -701,6 +702,76 @@ rrc::ue::rrc_mobility::rrc_mobility(rrc::ue* outer_ue) :
    ue_var_meas(std::make_shared<var_meas_cfg_t>())
  {}
  
@@ -1030,10 +1193,25 @@ index 305547524..a7675c3e3 100644
  //! Method to add Mobility Info to a RRC Connection Reconfiguration Message
  bool rrc::ue::rrc_mobility::fill_conn_recfg_msg(asn1::rrc::rrc_conn_recfg_r8_ies_s* conn_recfg)
  {
-@@ -985,6 +1055,135 @@ bool rrc::ue::rrc_mobility::start_enb_status_transfer()
+@@ -985,6 +1056,151 @@ bool rrc::ue::rrc_mobility::start_enb_status_transfer()
    return rrc_enb->s1ap->send_enb_status_transfer_proc(rrc_ue->rnti, bearer_list);
  }
  
++/*
++ * [ho-impl] Load virtual cell setting
++ */
++void rrc::ue::rrc_mobility::load_vcell(cell_cfg_t* cell_cfg_)
++{
++  int n_vcell = rrc_enb->cfg.vcell_list.size();
++  srand (time(NULL));
++  int vcell_idx = rand() % n_vcell;
++  cell_cfg_->meas_cfg.meas_reports.resize(1);
++  cell_cfg_->meas_cfg.meas_reports[0] = rrc_enb->cfg.vcell_list[vcell_idx];
++
++  auto& event = cell_cfg_->meas_cfg.meas_reports[0].trigger_type.event();
++  printf("[ho-debug] Vcell - %d, a3-offset - %d\n", vcell_idx, event.event_id.event_a3().a3_offset);
++}
++
 +/*
 + * [ho-impl] Entrance
 + * [ho-impl] Intra-eNB handover
@@ -1052,6 +1230,7 @@ index 305547524..a7675c3e3 100644
 +    if (cell_cfg->cell_id == pcell_id) {
 +      continue;
 +    }
++    load_vcell(&(*cell_cfg));
 +    uint32_t neighbor_cell_id = cell_cfg->cell_id;
 +    target_eci = (rrc_enb->cfg.enb_id << 8u) + neighbor_cell_id;
 +    printf("[ho-debug] current pci: %u, next pci: %u\n", pcell_id, neighbor_cell_id);
