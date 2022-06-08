@@ -76,7 +76,32 @@ On Ubuntu 18.04, run the all-in-one script to install and build the project:
 
 ### Configuration
 
-Same as the above configuration for carrier aggregation.
+Apply the same configuration as carrier aggregation.
+
+Due to hardware limitation, handover is performed between two physical cells. Flora can emulate multiple virtual cells identified by different upper-layer configurations.
+In release v2.0, Flora supports configurations in terms of various triggering conditions of measurement reports.
+To emulate virtual cells, you can add a list of handover settings at the end of ``./rr-ho.conf`` as follows: 
+
+```json
+  vcell_list = 
+  (
+    {
+      a3_report_type = "RSRP";
+      a3_offset = 6;
+      a3_hysteresis = 0;
+      a3_time_to_trigger = 480;
+    },
+    {
+      a3_report_type = "RSRP";
+      a3_offset = 4;
+      a3_hysteresis = 0;
+      a3_time_to_trigger = 480;
+    }
+  );
+
+```
+
+The example includes two virtual cells. Flora supports up to 32 cells.
 
 ### Execution
 
