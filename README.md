@@ -47,6 +47,9 @@ Flora supports in-depth base station analysis with costomizable analyzers.
 We also provide example applications for edge computing.
 For usage, please check our [documentation](https://project-flora.github.io/Flora/quick_start/).
 
+## Handover and Carrier Aggregation
+Flora supports new cellular network features for research. In the current release, handover and carrier aggregation are supported.
+To enable them, please refer to this [document](https://github.com/Project-Flora/Flora/blob/master/testbed-setup/scripts/srsRAN/README.md).
 
 
 ## Join the Community
