@@ -10,8 +10,8 @@ nav_order: 5
 - Main contributors
   - [Zhaowei Tan](http://web.cs.ucla.edu/~tan/)
   - [Jinghao Zhao](http://zhaojinghao.com/)
-  - [Zhehui Zhang](https://zhehuizhang.github.io/)
   - [Qianru Li](http://web.cs.ucla.edu/~qianruli/)
+  - [Zhehui Zhang](https://zhehuizhang.github.io/)
   - [Boyan Ding](zhaojinghao.com)
   - [Yunqi Guo](https://www.linkedin.com/in/yunqiguo)
 

@@ -88,7 +88,22 @@ Currently, put you analyzer and replayer as the following structure
 
 
 
-# Edge applications
+# Enable mobility and carrier aggregation support
+We provide advanced feature for 4G/5G mobility support, including
+**Carrier aggregation** and **Intra-eNodeB handover**.
+Both features are supported for commodity phones.
+
+## Hardware requirement
+These premium features are only supported if the base station can run multiple cells. We have deployed and tested on USRP X300 as the base station's radio module.
+
+
+## Enabling features
+You could then follow the installation steps in [this link](https://github.com/Project-Flora/Flora/blob/master/testbed-setup/scripts/srsRAN/README.md) to install one or both of the advanced features.
+
+
+
+# # Edge applications
 We provide example applications for edge computing.
 After the device established the connection with the testbed, you can install an edge application either in the server that is running Flora, or another server that is connected in LAN.
 Please request the VR edge computing software from [here](http://metro.cs.ucla.edu/codeshare.html).
+

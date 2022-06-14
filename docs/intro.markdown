@@ -41,9 +41,18 @@ It also includes built-in network analytics at both the device and the infrastru
 {% include youtubePlayer.html id="NqW86xTHoqE" %}
 
 
+
+**Advanced SDR LTE Features**
+- Mobility support with handover and carrier aggregation
+
+{% include youtubePlayer.html id="R5dfjVLfeQ" %}
+
+
+
+
 ## Potential Usage Scenarios
 - Build an open LTE platform for research and education
-- Deploy private LTE networks
+- Deploy private LTE networks with advanced features
 - Deploy edge computing systems
 
 
